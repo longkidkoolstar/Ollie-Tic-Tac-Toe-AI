@@ -1,0 +1,9 @@
+https://papergames.io/en/match-history/62e8d50791ca76002643de1a
+
+https://papergames.io/en/match-history/{user_id}
+
+
+button to copu the user id: document.querySelector("#mat-menu-panel-18 > div > button:nth-child(4)")
+
+
+usernames of current game stored here: document.querySelector("body > app-root > app-navigation > div > div.d-flex.flex-column.h-100.w-100 > main > app-room > div > div > div.col-md-9.col-lg-8.bg-gray-000.h-100.position-relative.overflow-hidden.ng-tns-c1645232060-15 > div > app-room-players")
