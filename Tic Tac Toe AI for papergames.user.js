@@ -40,31 +40,140 @@
     // Start polling every 1 second (adjust the interval as needed)
     waitForElementAndClick('svg.fa-xmark', 'app-count-down span', 1000);
 
-    function getBoardState() {
-        var boardState = [];
-        var gridItems = document.querySelectorAll('.grid.s-3x3 .grid-item');
-    
-        for (var i = 0; i < 3; i++) {
-            var row = [];
-            for (var j = 0; j < 3; j++) {
-                var cell = gridItems[i * 3 + j];
-                var svg = cell.querySelector('svg');
-                if (svg) {
-                    var label = svg.getAttribute('aria-label');
-                    if (label.toLowerCase().includes('x')) {
-                        row.push('x');
-                    } else if (label.toLowerCase().includes('o') || label.toLowerCase().includes('circle')) {
-                        row.push('o');
-                    } else {
-                        row.push('_');
-                    }
-                } else {
-                    row.push('_'); // An empty cell
+    // Game State Detection System
+    var lastGameState = null;
+
+    // Helper function to check if we're in matchmaking
+    function isInMatchmaking() {
+        var matchmakingSelectors = [
+            '.display-6.mb-4.text-center.animated.fast.fadeIn.ng-star-inserted',
+            '.display-6.mb-4.text-center',
+            '[class*="display-6"]'
+        ];
+
+        for (var i = 0; i < matchmakingSelectors.length; i++) {
+            var element = document.querySelector(matchmakingSelectors[i]);
+            if (element) {
+                var text = element.textContent.toLowerCase();
+                if (text.includes('finding a random player') ||
+                    text.includes('looking for opponent') ||
+                    text.includes('searching for player') ||
+                    text.includes('matchmaking')) {
+                    return true;
                 }
             }
-            boardState.push(row);
         }
-        return boardState;
+        return false;
+    }
+    function isInGame() {
+        try {
+            // First check if we're in matchmaking - this is a special state
+            if (isInMatchmaking()) {
+                // We're in matchmaking, not in a game yet, but also not in menu
+                if (lastGameState !== 'matchmaking') {
+                    BotManager.log('Entered matchmaking state');
+                    lastGameState = 'matchmaking';
+                }
+                return false; // Not in game yet, but don't trigger menu detection
+            }
+
+            // Check if we're actually in a tic-tac-toe game
+            var gameBoard = document.querySelector('.grid.s-3x3');
+
+            // Check for buttons that indicate we're NOT in a game
+            var playOnlineButton = document.querySelector("button.btn-secondary.flex-grow-1") ||
+                                  document.querySelector("body > app-root > app-navigation > div.d-flex.h-100 > div.d-flex.flex-column.h-100.w-100 > main > app-game-landing > div > div > div > div.col-12.col-lg-9.dashboard > div.card.area-buttons.d-flex.justify-content-center.align-items-center.flex-column > button.btn.btn-secondary.btn-lg.position-relative") ||
+                                  document.querySelector("button.btn.btn-secondary.btn-lg.position-relative");
+
+            // Check for post-game buttons (play again/leave) - these indicate game ended but still in room
+            var rematchButtons = document.querySelectorAll("body > app-root > app-navigation > div > div.d-flex.flex-column.h-100.w-100 > main > app-room > div > div > div.col-md-9.col-lg-8.bg-gray-000.h-100.position-relative.overflow-hidden.ng-tns-c1645232060-14 > div > div > div > app-re-match > div > button");
+            var leaveRoomButton = document.querySelector("button.btn-light.ng-tns-c189-7");
+            var playAgainButton = document.querySelector('button.btn.btn-secondary.mt-2.ng-star-inserted');
+
+            // If rematch buttons exist, we're in post-game state (not actively playing)
+            var inPostGame = rematchButtons && rematchButtons.length > 0;
+
+            // If any of these buttons are visible, we're not in an active game
+            if (playOnlineButton || leaveRoomButton || playAgainButton || inPostGame) {
+                if (lastGameState === true) {
+                    BotManager.log('Left game area - detected menu buttons');
+                    lastGameState = false;
+                }
+                return false;
+            }
+
+            // For tic-tac-toe, we mainly need the game board
+            // The tic-tac-toe-board element might not always be present, so let's be more flexible
+            var inGame = !!gameBoard; // Convert to boolean
+
+            // Additional check: if we have rematch buttons visible, we're between games (not actively playing)
+            if (inGame && (playAgainButton || inPostGame)) {
+                // We're in the game room but between games (post-game state)
+                if (lastGameState === true) {
+                    BotManager.log('Game ended - in post-game state with rematch buttons');
+                    lastGameState = 'post-game';
+                }
+                return false; // Not actively in game
+            }
+
+            if (inGame && lastGameState !== true) {
+                BotManager.log('Entered game area - game board detected');
+                lastGameState = true;
+            } else if (!inGame && lastGameState === true) {
+                BotManager.log('Left game area - game board not found');
+                lastGameState = false;
+            }
+
+            return inGame;
+        } catch (error) {
+            BotManager.log('Error in isInGame(): ' + error.message, 'ERROR');
+            return false;
+        }
+    }
+
+    function getBoardState() {
+        try {
+            var boardState = [];
+            var gridItems = document.querySelectorAll('.grid.s-3x3 .grid-item');
+
+            // Check if we have the game board
+            if (!gridItems || gridItems.length !== 9) {
+                // Try alternative selector
+                gridItems = document.querySelectorAll('.grid .grid-item');
+                if (!gridItems || gridItems.length !== 9) {
+                    return null;
+                }
+            }
+
+            for (var i = 0; i < 3; i++) {
+                var row = [];
+                for (var j = 0; j < 3; j++) {
+                    var cell = gridItems[i * 3 + j];
+                    if (!cell) {
+                        return null; // Safety check
+                    }
+
+                    var svg = cell.querySelector('svg');
+                    if (svg) {
+                        var label = svg.getAttribute('aria-label');
+                        if (label && label.toLowerCase().includes('x')) {
+                            row.push('x');
+                        } else if (label && (label.toLowerCase().includes('o') || label.toLowerCase().includes('circle'))) {
+                            row.push('o');
+                        } else {
+                            row.push('_');
+                        }
+                    } else {
+                        row.push('_'); // An empty cell
+                    }
+                }
+                boardState.push(row);
+            }
+            return boardState;
+        } catch (error) {
+            BotManager.log('Error in getBoardState(): ' + error.message, 'ERROR');
+            return null;
+        }
     }
 
     function simulateCellClick(row, col) {
@@ -81,6 +190,1190 @@
     }
 
     var prevChronometerValue = null;
+
+    // Enhanced Bot Management System
+    var BotManager = {
+        // Core state variables
+        isAutoPlayEnabled: false,
+        currentOpponentType: 'unknown', // 'bot', 'human', 'unknown'
+        currentGameCount: 0,
+        totalLosses: 0,
+        sessionStartTime: Date.now(),
+        lastMoveTime: null,
+        moveTimes: [],
+        detectionHistory: [],
+        gameResults: [],
+
+        // Detection settings
+        detectionSensitivity: 'balanced', // 'conservative', 'balanced', 'aggressive'
+        botResponseTimeThreshold: 3000, // ms
+        humanResponseTimeThreshold: 8000, // ms
+
+        // Game strategy settings
+        gamesPerBot: 7,
+        gamesPerHuman: 1,
+        maxLosses: 5,
+
+        // Initialize the bot manager
+        init: function() {
+            this.loadSettings();
+            this.loadKnownBots();
+            this.startHealthMonitoring();
+            this.log('BotManager initialized');
+        },
+
+        // Load settings from GM storage
+        loadSettings: function() {
+            var self = this;
+            Promise.all([
+                GM.getValue('autoPlayEnabled', false),
+                GM.getValue('totalLosses', 0),
+                GM.getValue('currentGameCount', 0),
+                GM.getValue('opponentType', 'unknown'),
+                GM.getValue('sessionStartTime', Date.now()),
+                GM.getValue('detectionSensitivity', 'balanced'),
+                GM.getValue('gamesPerBot', 7),
+                GM.getValue('gamesPerHuman', 1),
+                GM.getValue('maxLosses', 5)
+            ]).then(function(values) {
+                self.isAutoPlayEnabled = values[0];
+                self.totalLosses = values[1];
+                self.currentGameCount = values[2];
+                self.currentOpponentType = values[3];
+                self.sessionStartTime = values[4];
+                self.detectionSensitivity = values[5];
+                self.gamesPerBot = values[6];
+                self.gamesPerHuman = values[7];
+                self.maxLosses = values[8];
+                self.log('Settings loaded');
+            });
+        },
+
+        // Save settings to GM storage
+        saveSettings: function() {
+            GM.setValue('autoPlayEnabled', this.isAutoPlayEnabled);
+            GM.setValue('totalLosses', this.totalLosses);
+            GM.setValue('currentGameCount', this.currentGameCount);
+            GM.setValue('opponentType', this.currentOpponentType);
+            GM.setValue('sessionStartTime', this.sessionStartTime);
+            GM.setValue('detectionSensitivity', this.detectionSensitivity);
+            GM.setValue('gamesPerBot', this.gamesPerBot);
+            GM.setValue('gamesPerHuman', this.gamesPerHuman);
+            GM.setValue('maxLosses', this.maxLosses);
+        },
+
+        // Known bot names from bots.txt
+        knownBotNames: [
+            'Katha', 'Staci', 'Claudetta', 'Charline', 'Carolyne',
+            'Valerye', 'Rowena', 'Arabel', 'Zea', 'Paper Man'
+        ],
+
+        // Detect if opponent is bot or human
+        detectOpponentType: function(opponentName, responseTime) {
+            var confidence = 0;
+            var factors = [];
+
+            // Check against known bot names first (highest priority)
+            for (var i = 0; i < this.knownBotNames.length; i++) {
+                if (this.knownBotNames[i].toLowerCase() === opponentName.toLowerCase()) {
+                    confidence = 1.0; // 100% confidence
+                    factors.push('Known bot name: ' + opponentName);
+                    this.log('Opponent "' + opponentName + '" matched known bot list', 'SUCCESS');
+                    break;
+                }
+            }
+
+            // If not a known bot, continue with other detection methods
+            if (confidence < 1.0) {
+                // Response time analysis (if available)
+                if (responseTime !== null && responseTime !== undefined) {
+                    if (responseTime < this.botResponseTimeThreshold) {
+                        confidence += 0.3;
+                        factors.push('Fast response time: ' + responseTime + 'ms');
+                    } else if (responseTime > this.humanResponseTimeThreshold) {
+                        confidence -= 0.3;
+                        factors.push('Slow response time: ' + responseTime + 'ms');
+                    }
+                }
+
+                // Username pattern analysis
+                var botPatterns = [
+                    /^bot/i, /bot$/i, /^ai/i, /ai$/i,
+                    /^\d+$/, /^user\d+$/i, /^player\d+$/i,
+                    /^guest/i, /^anon/i, /^temp/i
+                ];
+
+                for (var i = 0; i < botPatterns.length; i++) {
+                    if (botPatterns[i].test(opponentName)) {
+                        confidence += 0.4;
+                        factors.push('Bot-like username pattern');
+                        break;
+                    }
+                }
+            }
+
+            // Move timing consistency (if we have enough data)
+            if (this.moveTimes.length >= 3) {
+                var avgTime = this.moveTimes.reduce(function(a, b) { return a + b; }) / this.moveTimes.length;
+                var variance = this.moveTimes.reduce(function(sum, time) {
+                    return sum + Math.pow(time - avgTime, 2);
+                }, 0) / this.moveTimes.length;
+
+                if (variance < 1000000) { // Low variance suggests bot
+                    confidence += 0.2;
+                    factors.push('Consistent timing pattern');
+                }
+            }
+
+            // Adjust confidence based on sensitivity setting
+            var threshold = 0.5;
+            if (this.detectionSensitivity === 'conservative') threshold = 0.7;
+            else if (this.detectionSensitivity === 'aggressive') threshold = 0.3;
+
+            var detectedType = confidence >= threshold ? 'bot' : 'human';
+
+            // Store detection result
+            this.detectionHistory.push({
+                opponent: opponentName,
+                type: detectedType,
+                confidence: confidence,
+                factors: factors,
+                timestamp: Date.now()
+            });
+
+            // Keep only last 20 detections
+            if (this.detectionHistory.length > 20) {
+                this.detectionHistory.shift();
+            }
+
+            this.log('Opponent detection: ' + opponentName + ' -> ' + detectedType + ' (confidence: ' + confidence.toFixed(2) + ')');
+            return detectedType;
+        },
+
+        // Record move timing
+        recordMoveTime: function() {
+            var currentTime = Date.now();
+            if (this.lastMoveTime) {
+                var responseTime = currentTime - this.lastMoveTime;
+                this.moveTimes.push(responseTime);
+
+                // Keep only last 10 move times
+                if (this.moveTimes.length > 10) {
+                    this.moveTimes.shift();
+                }
+
+                return responseTime;
+            }
+            this.lastMoveTime = currentTime;
+            return null;
+        },
+
+        // Enhanced logging system
+        logHistory: [],
+        maxLogEntries: 500,
+
+        log: function(message, level) {
+            level = level || 'INFO';
+            var timestamp = new Date();
+            var logEntry = {
+                timestamp: timestamp,
+                level: level,
+                message: message,
+                timeString: timestamp.toLocaleTimeString()
+            };
+
+            // Add to history
+            this.logHistory.push(logEntry);
+            if (this.logHistory.length > this.maxLogEntries) {
+                this.logHistory.shift();
+            }
+
+            // Console output with color coding
+            var color = level === 'ERROR' ? 'color: red' :
+                       level === 'WARN' ? 'color: orange' :
+                       level === 'SUCCESS' ? 'color: green' : 'color: blue';
+
+            console.log('%c[BotManager] ' + logEntry.timeString + ' [' + level + ']: ' + message, color);
+
+            // Update log display if it exists
+            this.updateLogDisplay();
+        },
+
+        updateLogDisplay: function() {
+            var logDisplay = document.getElementById('bot-log-display');
+            if (logDisplay) {
+                var recentLogs = this.logHistory.slice(-20).reverse();
+                var html = recentLogs.map(function(entry) {
+                    var colorClass = entry.level === 'ERROR' ? 'color: #e74c3c' :
+                                   entry.level === 'WARN' ? 'color: #f39c12' :
+                                   entry.level === 'SUCCESS' ? 'color: #2ecc71' : 'color: #3498db';
+                    return '<div style="' + colorClass + '; margin-bottom: 2px;">' +
+                           entry.timeString + ' [' + entry.level + ']: ' + entry.message + '</div>';
+                }).join('');
+                logDisplay.innerHTML = html;
+            }
+        },
+
+        exportLogs: function() {
+            var logData = {
+                sessionStart: new Date(this.sessionStartTime).toISOString(),
+                sessionEnd: new Date().toISOString(),
+                totalRuntime: this.getRuntime(),
+                settings: {
+                    detectionSensitivity: this.detectionSensitivity,
+                    gamesPerBot: this.gamesPerBot,
+                    gamesPerHuman: this.gamesPerHuman,
+                    maxLosses: this.maxLosses
+                },
+                stats: {
+                    totalGames: this.gameResults.length,
+                    totalLosses: this.totalLosses,
+                    detectionAccuracy: this.getDetectionAccuracy(),
+                    winRate: this.getWinRate()
+                },
+                logs: this.logHistory,
+                detectionHistory: this.detectionHistory,
+                gameResults: this.gameResults
+            };
+
+            var blob = new Blob([JSON.stringify(logData, null, 2)], { type: 'application/json' });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = 'tic-tac-toe-bot-logs-' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            this.log('Logs exported successfully', 'SUCCESS');
+        },
+
+        getWinRate: function() {
+            if (this.gameResults.length === 0) return 0;
+            var wins = this.gameResults.filter(function(r) { return r.result === 'win'; }).length;
+            return Math.round((wins / this.gameResults.length) * 100);
+        },
+
+        // Bot thinking state management
+        currentThinking: 'Initializing...',
+        nextAction: 'Waiting for game',
+        currentOpponentName: 'Unknown',
+
+        setThinking: function(thinking, nextAction) {
+            this.currentThinking = thinking;
+            this.nextAction = nextAction || 'Analyzing...';
+            this.updateThinkingDisplay();
+        },
+
+        updateThinkingDisplay: function() {
+            var thinkingDisplay = document.getElementById('bot-thinking-display');
+            if (thinkingDisplay) {
+                thinkingDisplay.innerHTML =
+                    '<div style="color: #3498db; font-weight: bold;">🤖 ' + this.currentThinking + '</div>' +
+                    '<div style="color: #2ecc71; font-size: 11px; margin-top: 3px;">➤ ' + this.nextAction + '</div>';
+            }
+        },
+
+        // Your username for filtering
+        myUsername: 'notlongkidkoolstar',
+
+        // Detect current opponent name
+        detectOpponentName: function() {
+            try {
+                // Don't change opponent name too frequently - only update if we don't have one or if we're in a new game
+                if (this.currentOpponentName !== 'Unknown' && this.currentOpponentName !== 'Not detected' &&
+                    GameManager && GameManager.gameInProgress) {
+                    return this.currentOpponentName; // Keep current name during active game
+                }
+
+                // Common selectors for opponent name in game UI
+                var nameSelectors = [
+                    '.player-name',
+                    '.opponent-name',
+                    '[class*="opponent"]',
+                    '[class*="player"]',
+                    '.game-info .player-name',
+                    '.player-info .name',
+                    '.vs .player',
+                    '.players .player',
+                    // Generic selectors for names
+                    '.name',
+                    '[data-player="opponent"]',
+                    '[data-player="2"]'
+                ];
+
+                var potentialNames = [];
+
+                for (var i = 0; i < nameSelectors.length; i++) {
+                    var elements = document.querySelectorAll(nameSelectors[i]);
+                    for (var j = 0; j < elements.length; j++) {
+                        var element = elements[j];
+                        var text = element.textContent.trim();
+
+                        // Skip empty text, your own name, or common UI text
+                        if (text && text.length > 0 && text.length < 50 &&
+                            text.toLowerCase() !== this.myUsername.toLowerCase() && // Skip your own name
+                            !text.toLowerCase().includes(this.myUsername.toLowerCase()) && // Skip text containing your username
+                            !text.includes('vs') && !text.includes('VS') &&
+                            !text.includes('Player') && !text.includes('Opponent') &&
+                            !text.includes('You') && !text.includes('Current') &&
+                            !text.includes('Score') && !text.includes('Time') &&
+                            !text.includes('Tic') && !text.includes('Tac') &&
+                            !text.match(/^\d+$/) && // Skip pure numbers
+                            !text.match(/\d{2,}/) && // Skip text with long numbers (timestamps/scores)
+                            !text.includes(':') && // Skip time/score formats
+                            !text.includes('Game') && !text.includes('Round') &&
+                            text.match(/^[a-zA-Z0-9\s_-]+$/) && // Only allow reasonable username characters
+                            text.length >= 3 && text.length <= 20) { // Reasonable username length
+
+                            // Try to extract clean name from potentially messy text
+                            var cleanName = this.extractCleanName(text);
+                            if (cleanName && potentialNames.indexOf(cleanName) === -1) {
+                                potentialNames.push(cleanName);
+                                this.log('Found potential opponent name: "' + cleanName + '" (extracted from: "' + text + '") via selector: ' + nameSelectors[i]);
+                            }
+                        }
+                    }
+                }
+
+                // If we found potential names, pick the most likely one
+                if (potentialNames.length > 0) {
+                    // Prefer known bot names
+                    for (var k = 0; k < potentialNames.length; k++) {
+                        var name = potentialNames[k];
+                        for (var l = 0; l < this.knownBotNames.length; l++) {
+                            if (this.knownBotNames[l].toLowerCase() === name.toLowerCase()) {
+                                this.currentOpponentName = name;
+                                this.log('Opponent name confirmed (known bot): "' + name + '"', 'SUCCESS');
+                                return name;
+                            }
+                        }
+                    }
+
+                    // If no known bot, take the first reasonable name
+                    var selectedName = potentialNames[0];
+                    if (selectedName !== this.currentOpponentName) {
+                        this.currentOpponentName = selectedName;
+                        this.log('Opponent name set to: "' + selectedName + '"', 'INFO');
+                    }
+                    return selectedName;
+                }
+
+                return this.currentOpponentName;
+            } catch (error) {
+                this.log('Error detecting opponent name: ' + error.message, 'WARN');
+                return 'Unknown';
+            }
+        },
+
+        // Extract clean opponent name from messy text
+        extractCleanName: function(text) {
+            // Check against known bot names first - they might be embedded in the text
+            for (var i = 0; i < this.knownBotNames.length; i++) {
+                var botName = this.knownBotNames[i];
+                if (text.toLowerCase().includes(botName.toLowerCase())) {
+                    return botName; // Return the clean bot name
+                }
+            }
+
+            // Try to extract a reasonable username from the text
+            // Remove your username if it appears
+            var cleanText = text.replace(new RegExp(this.myUsername, 'gi'), '');
+
+            // Remove common patterns: numbers with colons (scores/times), long numbers
+            cleanText = cleanText.replace(/\d{2,}:\d+/g, ''); // Remove score patterns like "01:53"
+            cleanText = cleanText.replace(/\d{3,}/g, ''); // Remove long numbers
+            cleanText = cleanText.replace(/[:\d]{3,}/g, ''); // Remove colon-number patterns
+
+            // Split by common separators and find the longest reasonable part
+            var parts = cleanText.split(/[\s:,\-_]+/);
+            var bestPart = '';
+
+            for (var j = 0; j < parts.length; j++) {
+                var part = parts[j].trim();
+                if (part.length >= 3 && part.length <= 20 &&
+                    part.match(/^[a-zA-Z][a-zA-Z0-9\s]*$/) && // Starts with letter
+                    !part.match(/^\d+$/) && // Not just numbers
+                    part.toLowerCase() !== this.myUsername.toLowerCase()) {
+                    if (part.length > bestPart.length) {
+                        bestPart = part;
+                    }
+                }
+            }
+
+            return bestPart.length >= 3 ? bestPart : null;
+        },
+
+        // Reset opponent name when starting new matchmaking
+        resetOpponentName: function() {
+            this.currentOpponentName = 'Unknown';
+            this.log('Opponent name reset for new matchmaking');
+        },
+
+        // Add a new bot name to the known list
+        addKnownBot: function(botName) {
+            if (!this.knownBotNames.includes(botName)) {
+                this.knownBotNames.push(botName);
+                this.log('Added new bot to known list: ' + botName, 'INFO');
+
+                // Save to GM storage for persistence
+                GM.setValue('knownBotNames', JSON.stringify(this.knownBotNames));
+                return true;
+            }
+            return false;
+        },
+
+        // Load known bot names from storage
+        loadKnownBots: function() {
+            var self = this;
+            GM.getValue('knownBotNames', '[]').then(function(storedBots) {
+                try {
+                    var savedBots = JSON.parse(storedBots);
+                    if (savedBots.length > 0) {
+                        // Merge with default list, avoiding duplicates
+                        savedBots.forEach(function(botName) {
+                            if (!self.knownBotNames.includes(botName)) {
+                                self.knownBotNames.push(botName);
+                            }
+                        });
+                        self.log('Loaded ' + savedBots.length + ' additional bot names from storage');
+                    }
+                } catch (e) {
+                    self.log('Error loading saved bot names: ' + e.message, 'WARN');
+                }
+            });
+        },
+
+        // Health monitoring and 24-hour operation
+        startHealthMonitoring: function() {
+            var self = this;
+            setInterval(function() {
+                self.performHealthCheck();
+            }, 300000); // Every 5 minutes
+
+            // Memory cleanup every 30 minutes
+            setInterval(function() {
+                self.performMemoryCleanup();
+            }, 1800000);
+
+            // Error recovery check every minute
+            setInterval(function() {
+                self.performErrorRecovery();
+            }, 60000);
+        },
+
+        performHealthCheck: function() {
+            var runtime = Date.now() - this.sessionStartTime;
+            var hours = runtime / 3600000;
+
+            this.log('Health check - Runtime: ' + this.getRuntime() +
+                    ', Games: ' + this.gameResults.length +
+                    ', Losses: ' + this.totalLosses +
+                    ', Detection accuracy: ' + this.getDetectionAccuracy() + '%');
+
+            // Auto-disable after 24 hours for safety
+            if (hours >= 24 && this.isAutoPlayEnabled) {
+                this.log('24-hour limit reached. Auto-disabling for safety.');
+                this.isAutoPlayEnabled = false;
+                this.saveSettings();
+                this.show24HourNotification();
+            }
+
+            // Check for stuck states
+            if (this.gameResults.length === 0 && hours > 0.5) {
+                this.log('Warning: No games played in 30 minutes. Possible stuck state.');
+            }
+        },
+
+        performMemoryCleanup: function() {
+            // Keep only recent data to prevent memory leaks
+            if (this.detectionHistory.length > 50) {
+                this.detectionHistory = this.detectionHistory.slice(-30);
+            }
+
+            if (this.gameResults.length > 100) {
+                this.gameResults = this.gameResults.slice(-50);
+            }
+
+            if (this.moveTimes.length > 20) {
+                this.moveTimes = this.moveTimes.slice(-10);
+            }
+
+            this.log('Memory cleanup performed');
+        },
+
+        performErrorRecovery: function() {
+            // Check for common error states and attempt recovery
+            if (this.isAutoPlayEnabled && this.currentOpponentType === 'unknown') {
+                var timeSinceLastDetection = Date.now() - (this.detectionHistory.length > 0 ?
+                    this.detectionHistory[this.detectionHistory.length - 1].timestamp : this.sessionStartTime);
+
+                // If no detection for 10 minutes, reset
+                if (timeSinceLastDetection > 600000) {
+                    this.log('No opponent detection for 10 minutes. Attempting recovery.');
+                    this.currentGameCount = 0;
+                    this.saveSettings();
+                }
+            }
+        },
+
+        getDetectionAccuracy: function() {
+            if (this.detectionHistory.length < 2) return 100;
+
+            var accurate = this.detectionHistory.filter(function(detection) {
+                return detection.confidence > 0.6;
+            }).length;
+
+            return Math.round((accurate / this.detectionHistory.length) * 100);
+        },
+
+        show24HourNotification: function() {
+            var notification = document.createElement('div');
+            notification.style.position = 'fixed';
+            notification.style.top = '50%';
+            notification.style.left = '50%';
+            notification.style.transform = 'translate(-50%, -50%)';
+            notification.style.backgroundColor = '#f39c12';
+            notification.style.color = 'white';
+            notification.style.padding = '20px';
+            notification.style.borderRadius = '10px';
+            notification.style.zIndex = '10001';
+            notification.style.textAlign = 'center';
+            notification.style.fontSize = '16px';
+            notification.style.fontWeight = 'bold';
+            notification.innerHTML = '24-HOUR LIMIT REACHED!<br>Auto-play disabled for safety.<br>Re-enable in settings if needed.';
+
+            document.body.appendChild(notification);
+
+            setTimeout(function() {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 15000);
+        },
+
+        getRuntime: function() {
+            var runtime = Date.now() - this.sessionStartTime;
+            var hours = Math.floor(runtime / 3600000);
+            var minutes = Math.floor((runtime % 3600000) / 60000);
+            return hours + 'h ' + minutes + 'm';
+        }
+    };
+
+    // Safety and Reliability System
+    var SafetyManager = {
+        errorCount: 0,
+        maxErrors: 10,
+        lastErrorTime: 0,
+        safeMode: false,
+
+        // Global error handler
+        init: function() {
+            var self = this;
+
+            // Catch unhandled errors
+            window.addEventListener('error', function(event) {
+                self.handleError('JavaScript Error: ' + event.message, event.error);
+            });
+
+            // Catch unhandled promise rejections
+            window.addEventListener('unhandledrejection', function(event) {
+                self.handleError('Promise Rejection: ' + event.reason, event.reason);
+            });
+
+            BotManager.log('SafetyManager initialized', 'INFO');
+        },
+
+        handleError: function(message) {
+            this.errorCount++;
+            this.lastErrorTime = Date.now();
+
+            BotManager.log('Error #' + this.errorCount + ': ' + message, 'ERROR');
+
+            if (this.errorCount >= this.maxErrors) {
+                this.enableSafeMode();
+            }
+
+            // Auto-recovery attempt
+            setTimeout(function() {
+                SafetyManager.attemptRecovery();
+            }, 5000);
+        },
+
+        enableSafeMode: function() {
+            this.safeMode = true;
+            BotManager.isAutoPlayEnabled = false;
+            BotManager.saveSettings();
+
+            BotManager.log('SAFE MODE ENABLED - Too many errors detected', 'ERROR');
+
+            this.showSafeModeNotification();
+        },
+
+        showSafeModeNotification: function() {
+            var notification = document.createElement('div');
+            notification.style.position = 'fixed';
+            notification.style.top = '50%';
+            notification.style.left = '50%';
+            notification.style.transform = 'translate(-50%, -50%)';
+            notification.style.backgroundColor = '#c0392b';
+            notification.style.color = 'white';
+            notification.style.padding = '20px';
+            notification.style.borderRadius = '10px';
+            notification.style.zIndex = '10002';
+            notification.style.textAlign = 'center';
+            notification.style.fontSize = '16px';
+            notification.style.fontWeight = 'bold';
+            notification.innerHTML = '⚠️ SAFE MODE ACTIVATED ⚠️<br>Multiple errors detected.<br>Auto-play disabled for safety.<br>Check console for details.';
+
+            document.body.appendChild(notification);
+
+            setTimeout(function() {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 20000);
+        },
+
+        attemptRecovery: function() {
+            if (this.safeMode) return;
+
+            try {
+                // Reset game state
+                BotManager.currentOpponentType = 'unknown';
+                BotManager.currentGameCount = 0;
+                GameManager.gameInProgress = false;
+                GameEndDetector.reset();
+
+                BotManager.log('Recovery attempt completed', 'INFO');
+            } catch (e) {
+                BotManager.log('Recovery attempt failed: ' + e.message, 'ERROR');
+            }
+        },
+
+        resetErrorCount: function() {
+            this.errorCount = 0;
+            this.safeMode = false;
+            BotManager.log('Error count reset - Safe mode disabled', 'SUCCESS');
+        }
+    };
+
+    // Initialize Safety Manager
+    SafetyManager.init();
+
+    // Game Management System (Global scope)
+    var GameManager = {
+        gameInProgress: false,
+        gameStartTime: null,
+        gameEndTime: null,
+
+        // Start a new game
+        startGame: function() {
+            this.gameInProgress = true;
+            this.gameStartTime = Date.now();
+            BotManager.recordMoveTime(); // Reset move timing
+            BotManager.log('Game started');
+            BotManager.setThinking('Game in progress', 'Analyzing board and planning moves');
+        },
+
+        // End current game
+        endGame: function(result) {
+            if (!this.gameInProgress) return;
+
+            this.gameInProgress = false;
+            this.gameEndTime = Date.now();
+            var gameDuration = this.gameEndTime - this.gameStartTime;
+
+            // Record game result
+            BotManager.gameResults.push({
+                result: result,
+                duration: gameDuration,
+                opponent: BotManager.currentOpponentType,
+                timestamp: this.gameEndTime
+            });
+
+            // Update loss counter
+            if (result === 'loss') {
+                BotManager.totalLosses++;
+                BotManager.saveSettings();
+            }
+
+            BotManager.log('Game ended: ' + result + ' (duration: ' + (gameDuration/1000).toFixed(1) + 's)');
+
+            // Check if we should continue or stop
+            this.handleGameEnd();
+        },
+
+        // Handle post-game logic
+        handleGameEnd: function() {
+            // Check loss limit
+            if (BotManager.totalLosses >= BotManager.maxLosses) {
+                BotManager.log('Loss limit reached (' + BotManager.maxLosses + '). Stopping auto-play.');
+                BotManager.isAutoPlayEnabled = false;
+                BotManager.saveSettings();
+                this.showLossLimitNotification();
+                return;
+            }
+
+            if (!BotManager.isAutoPlayEnabled) return;
+
+            // Determine next action based on opponent type and game count
+            var maxGames = BotManager.currentOpponentType === 'bot' ? BotManager.gamesPerBot : BotManager.gamesPerHuman;
+            BotManager.currentGameCount++;
+
+            BotManager.log('Game ' + BotManager.currentGameCount + '/' + maxGames + ' vs ' + BotManager.currentOpponentType);
+
+            if (BotManager.currentGameCount >= maxGames) {
+                // Cycle complete - leave and find new opponent
+                BotManager.log('Cycle complete. Leaving to find new opponent.');
+                BotManager.setThinking('Cycle complete (' + maxGames + ' games)', 'Waiting for leave button');
+                BotManager.currentGameCount = 0;
+                BotManager.currentOpponentType = 'unknown';
+                BotManager.saveSettings();
+
+                // Wait for rematch buttons to appear, then click leave
+                waitForRematchButtons(function() {
+                    BotManager.setThinking('Leaving current room', 'Clicking leave button');
+                    BotManager.resetOpponentName(); // Reset opponent name when leaving
+                    clickLeaveRoomButton();
+                    setTimeout(function() {
+                        BotManager.setThinking('Finding new opponent', 'Clicking play online button');
+                        clickPlayOnlineButton();
+                    }, 1000);
+                }, false);
+            } else if (BotManager.currentOpponentType === 'bot') {
+                // Continue with bot - click play again
+                BotManager.log('Continuing with bot. Clicking play again.');
+                BotManager.setThinking('Continuing vs bot (' + BotManager.currentGameCount + '/' + maxGames + ')', 'Waiting for rematch buttons');
+
+                // Wait for rematch buttons to appear, then click play again
+                waitForRematchButtons(function() {
+                    if (!clickPlayAgainButton()) {
+                        // Fallback: leave and find new opponent
+                        BotManager.log('Play again button not found. Leaving to find new opponent.');
+                        BotManager.setThinking('Play again failed', 'Leaving to find new opponent');
+                        BotManager.resetOpponentName(); // Reset opponent name when leaving
+                        clickLeaveRoomButton();
+                        setTimeout(function() {
+                            BotManager.setThinking('Finding new opponent', 'Clicking play online button');
+                            clickPlayOnlineButton();
+                        }, 1000);
+                    } else {
+                        BotManager.setThinking('Play again clicked', 'Waiting for new game to start');
+                        // Start monitoring for the new game to begin
+                        setTimeout(function() {
+                            checkForNewGameStart();
+                        }, 1000);
+                    }
+                }, true);
+            } else {
+                // Human opponent - leave after 1 game
+                BotManager.log('Human opponent detected. Leaving after 1 game.');
+                BotManager.setThinking('Human opponent - 1 game complete', 'Waiting for leave button');
+                BotManager.currentGameCount = 0;
+                BotManager.currentOpponentType = 'unknown';
+                BotManager.saveSettings();
+
+                // Wait for rematch buttons to appear, then click leave
+                waitForRematchButtons(function() {
+                    BotManager.setThinking('Leaving after human game', 'Clicking leave button');
+                    BotManager.resetOpponentName(); // Reset opponent name when leaving
+                    clickLeaveRoomButton();
+                    setTimeout(function() {
+                        BotManager.setThinking('Finding new opponent', 'Clicking play online button');
+                        clickPlayOnlineButton();
+                    }, 1000);
+                }, false);
+            }
+        },
+
+        // Show loss limit notification
+        showLossLimitNotification: function() {
+            var notification = document.createElement('div');
+            notification.style.position = 'fixed';
+            notification.style.top = '50%';
+            notification.style.left = '50%';
+            notification.style.transform = 'translate(-50%, -50%)';
+            notification.style.backgroundColor = '#dc3545';
+            notification.style.color = 'white';
+            notification.style.padding = '20px';
+            notification.style.borderRadius = '10px';
+            notification.style.zIndex = '10000';
+            notification.style.textAlign = 'center';
+            notification.style.fontSize = '16px';
+            notification.style.fontWeight = 'bold';
+            notification.innerHTML = 'LOSS LIMIT REACHED!<br>Auto-play has been disabled.<br>Reset in settings to continue.';
+
+            document.body.appendChild(notification);
+
+            setTimeout(function() {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 10000);
+        }
+    };
+
+    // Button Click Functions (Global scope)
+    function clickLeaveRoomButton() {
+        BotManager.log('Searching for leave room button...');
+
+        // Check for app-juicy-button components first
+        var juicyButtons = document.querySelectorAll('app-juicy-button');
+        BotManager.log('Found ' + juicyButtons.length + ' app-juicy-button components for leave detection');
+
+        for (var i = 0; i < juicyButtons.length; i++) {
+            var juicyButton = juicyButtons[i];
+            var buttonText = juicyButton.textContent.toLowerCase().trim();
+            BotManager.log('Leave check - App-juicy-button ' + i + ' text: "' + buttonText + '"');
+
+            // Since both buttons might say "Play again!", we need to distinguish them
+            // The leave button is typically the second one or has different positioning
+            if (buttonText.includes('leave') || buttonText.includes('exit') || buttonText.includes('quit') ||
+                buttonText.includes('back') || buttonText.includes('menu') || buttonText.includes('close')) {
+                var innerButton = juicyButton.querySelector('button');
+                if (innerButton) {
+                    innerButton.click();
+                    BotManager.log('Clicked leave room app-juicy-button: "' + buttonText + '"');
+                    return true;
+                }
+            }
+        }
+
+        // If both buttons say "Play again!", try to distinguish by position
+        // Typically the leave button is the second button or in a different container
+        if (juicyButtons.length >= 2) {
+            BotManager.log('Multiple juicy buttons found, trying to identify leave button by position');
+
+            // Try the second button (often the leave button)
+            var secondButton = juicyButtons[1];
+            var secondButtonText = secondButton.textContent.toLowerCase().trim();
+
+            // If it contains "play again", it might still be the leave button in disguise
+            if (secondButtonText.includes('play') || secondButtonText.includes('again')) {
+                var innerButton = secondButton.querySelector('button');
+                if (innerButton) {
+                    BotManager.log('Clicking second juicy button as potential leave button: "' + secondButtonText + '"');
+                    innerButton.click();
+                    return true;
+                }
+            }
+        }
+
+        // Legacy selectors for backwards compatibility
+        var legacySelectors = [
+            "button.btn-light.ng-tns-c189-7",
+            "app-re-match button",
+            "button[class*='btn-light']",
+            "button[class*='leave']",
+            "button[class*='exit']"
+        ];
+
+        for (var j = 0; j < legacySelectors.length; j++) {
+            var buttons = document.querySelectorAll(legacySelectors[j]);
+            for (var k = 0; k < buttons.length; k++) {
+                var button = buttons[k];
+                var buttonText = button.textContent.toLowerCase();
+                if (buttonText.includes('leave') || buttonText.includes('exit') || buttonText.includes('quit') ||
+                    buttonText.includes('back') || buttonText.includes('menu')) {
+                    button.click();
+                    BotManager.log('Clicked leave room button using legacy selector: ' + legacySelectors[j]);
+                    return true;
+                }
+            }
+        }
+
+        // Final fallback - search all buttons for leave-related text
+        var allButtons = document.querySelectorAll('button');
+        for (var l = 0; l < allButtons.length; l++) {
+            var button = allButtons[l];
+            var text = button.textContent.toLowerCase();
+            if (text.includes('leave') || text.includes('exit') || text.includes('quit') ||
+                text.includes('back') || text.includes('menu')) {
+                button.click();
+                BotManager.log('Clicked leave room button found by text search: ' + text.trim());
+                return true;
+            }
+        }
+
+        BotManager.log('Leave room button not found with any method', 'WARN');
+        BotManager.log('=== DEBUG: All app-juicy-button components ===');
+        var debugJuicy = document.querySelectorAll('app-juicy-button');
+        for (var m = 0; m < debugJuicy.length; m++) {
+            var juicy = debugJuicy[m];
+            BotManager.log('Juicy ' + m + ': "' + juicy.textContent.trim() + '" classes: ' + juicy.className);
+        }
+        return false;
+    }
+
+    function clickPlayOnlineButton() {
+        // First check if we're already in matchmaking
+        if (isInMatchmaking()) {
+            BotManager.log('Already in matchmaking - "Finding a random player..." detected, skipping play online button search');
+            BotManager.setThinking('Already matchmaking', 'Waiting for opponent...');
+            return true;
+        }
+
+        BotManager.log('Not in matchmaking, searching for play online button...');
+
+        // Try multiple selectors for the play online button
+        var selectors = [
+            "button.btn-secondary.flex-grow-1",
+            "body > app-root > app-navigation > div.d-flex.h-100 > div.d-flex.flex-column.h-100.w-100 > main > app-game-landing > div > div > div > div.col-12.col-lg-9.dashboard > div.card.area-buttons.d-flex.justify-content-center.align-items-center.flex-column > button.btn.btn-secondary.btn-lg.position-relative",
+            "button.btn.btn-secondary.btn-lg.position-relative",
+            "button[class*='btn-secondary'][class*='btn-lg']"
+        ];
+
+        for (var i = 0; i < selectors.length; i++) {
+            var playOnlineButton = document.querySelector(selectors[i]);
+            if (playOnlineButton && playOnlineButton.textContent.toLowerCase().includes('play')) {
+                playOnlineButton.click();
+                BotManager.log('Clicked play online button using selector: ' + selectors[i]);
+
+                // Reset opponent name for new matchmaking
+                BotManager.resetOpponentName();
+
+                // Wait for "Finding a random player..." text to appear
+                BotManager.setThinking('Play online clicked', 'Waiting for matchmaking to start');
+                waitForMatchmaking();
+                return true;
+            }
+        }
+
+        // Check if matchmaking started after our click attempt
+        setTimeout(function() {
+            if (isInMatchmaking()) {
+                BotManager.log('Matchmaking started successfully after click attempt');
+                BotManager.setThinking('Matchmaking active', 'Finding opponent...');
+            } else {
+                BotManager.log('Play online button not found and no matchmaking detected', 'WARN');
+            }
+        }, 1000);
+
+        return false;
+    }
+
+    // Wait for matchmaking to start
+    function waitForMatchmaking() {
+        var attempts = 0;
+        var maxAttempts = 20; // 10 seconds max
+
+        var checkMatchmaking = setInterval(function() {
+            attempts++;
+
+            // Use the helper function to check for matchmaking
+            var foundMatchmaking = isInMatchmaking();
+
+            if (foundMatchmaking) {
+                BotManager.log('Matchmaking detected');
+            }
+
+            if (foundMatchmaking) {
+                clearInterval(checkMatchmaking);
+                BotManager.setThinking('Matchmaking active', 'Finding opponent...');
+                BotManager.log('Matchmaking started successfully after ' + (attempts * 0.5) + ' seconds');
+            } else if (attempts >= maxAttempts) {
+                clearInterval(checkMatchmaking);
+                BotManager.setThinking('Matchmaking timeout', 'Checking if already in game or need to retry');
+                BotManager.log('Matchmaking text not found after 10 seconds - checking game state', 'WARN');
+
+                // Check if we're already in a game (matchmaking succeeded but we missed it)
+                setTimeout(function() {
+                    if (isInGame()) {
+                        BotManager.log('Actually in game now - matchmaking must have succeeded');
+                        BotManager.setThinking('In game', 'Matchmaking succeeded');
+                    } else {
+                        BotManager.log('Not in game and no matchmaking detected - may need manual intervention', 'ERROR');
+                    }
+                }, 1000);
+            }
+        }, 500);
+    }
+
+    // Check for new game start after clicking play again
+    function checkForNewGameStart() {
+        var attempts = 0;
+        var maxAttempts = 20; // 10 seconds max
+
+        BotManager.log('Monitoring for new game start after play again...');
+
+        var checkGame = setInterval(function() {
+            attempts++;
+
+            // Check if we're now in a game
+            if (isInGame()) {
+                clearInterval(checkGame);
+                BotManager.log('New game detected after play again - game board found');
+                BotManager.setThinking('New game started', 'Playing against same opponent');
+
+                // Start the new game
+                if (GameManager) {
+                    GameManager.startGame();
+                }
+            } else if (attempts >= maxAttempts) {
+                clearInterval(checkGame);
+                BotManager.log('New game not detected after 10 seconds - may need manual intervention', 'WARN');
+                BotManager.setThinking('Game start timeout', 'Checking current state');
+            }
+        }, 500);
+    }
+
+    // Wait for rematch buttons to appear after game ends
+    function waitForRematchButtons(callback, isPlayAgain) {
+        var attempts = 0;
+        var maxAttempts = 20; // 10 seconds max
+        var actionType = isPlayAgain ? 'play again' : 'leave';
+
+        BotManager.setThinking('Game ended', 'Waiting for ' + actionType + ' button to appear');
+
+        var checkButtons = setInterval(function() {
+            attempts++;
+
+            // Check for new app-juicy-button structure
+            var juicyButtons = document.querySelectorAll('app-juicy-button');
+            var legacyButtons = document.querySelectorAll("body > app-root > app-navigation > div > div.d-flex.flex-column.h-100.w-100 > main > app-room > div > div > div.col-md-9.col-lg-8.bg-gray-000.h-100.position-relative.overflow-hidden.ng-tns-c1645232060-14 > div > div > div > app-re-match > div > button");
+
+            var buttonsFound = juicyButtons.length > 0 || legacyButtons.length > 0;
+
+            if (buttonsFound) {
+                clearInterval(checkButtons);
+                BotManager.log('Rematch buttons appeared after ' + (attempts * 0.5) + ' seconds');
+                BotManager.log('Found ' + juicyButtons.length + ' app-juicy-button components and ' + legacyButtons.length + ' legacy buttons');
+                BotManager.setThinking('Buttons found', 'Clicking ' + actionType + ' button');
+                callback();
+            } else if (attempts >= maxAttempts) {
+                clearInterval(checkButtons);
+                BotManager.log('Rematch buttons did not appear after 10 seconds', 'WARN');
+                BotManager.setThinking('Button timeout', 'Falling back to leave and find new opponent');
+
+                // Debug: Log what we can see
+                BotManager.log('=== DEBUG: What we can see after timeout ===');
+                var allJuicy = document.querySelectorAll('app-juicy-button');
+                var allButtons = document.querySelectorAll('button');
+                BotManager.log('Total app-juicy-button components: ' + allJuicy.length);
+                BotManager.log('Total button elements: ' + allButtons.length);
+
+                // Fallback: leave and find new opponent
+                setTimeout(function() {
+                    clickLeaveRoomButton();
+                    setTimeout(function() {
+                        clickPlayOnlineButton();
+                    }, 1000);
+                }, 1000);
+            }
+        }, 500);
+    }
+
+    // Smart Play Again Button Logic
+    function clickPlayAgainButton() {
+        BotManager.log('Searching for play again button...');
+
+        // New selectors for app-juicy-button structure
+        var juicyButtonSelectors = [
+            'app-juicy-button button',  // Any button inside app-juicy-button
+            'app-juicy-button.mt-3 button',  // Button with mt-3 class
+            'app-juicy-button button.btn.btn-secondary',  // Specific button class
+            'button .front.text span'  // The span containing the text
+        ];
+
+        // Try the new app-juicy-button selectors first
+        for (var i = 0; i < juicyButtonSelectors.length; i++) {
+            var buttons = document.querySelectorAll(juicyButtonSelectors[i]);
+            BotManager.log('Juicy button selector "' + juicyButtonSelectors[i] + '" found ' + buttons.length + ' buttons');
+
+            for (var j = 0; j < buttons.length; j++) {
+                var button = buttons[j];
+                var buttonText = button.textContent.toLowerCase().trim();
+                BotManager.log('Juicy button text: "' + buttonText + '"');
+
+                if (buttonText.includes('play') && buttonText.includes('again')) {
+                    // For app-juicy-button, we need to click the actual button element
+                    var actualButton = button.tagName === 'BUTTON' ? button : button.closest('button');
+                    if (actualButton) {
+                        actualButton.click();
+                        BotManager.log('Clicked play again button using juicy selector: "' + buttonText + '"');
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // Check for app-juicy-button components specifically
+        var juicyButtons = document.querySelectorAll('app-juicy-button');
+        BotManager.log('Found ' + juicyButtons.length + ' app-juicy-button components');
+
+        for (var k = 0; k < juicyButtons.length; k++) {
+            var juicyButton = juicyButtons[k];
+            var buttonText = juicyButton.textContent.toLowerCase().trim();
+            BotManager.log('App-juicy-button ' + k + ' text: "' + buttonText + '"');
+
+            if (buttonText.includes('play') && buttonText.includes('again')) {
+                // Find the actual button element inside
+                var innerButton = juicyButton.querySelector('button');
+                if (innerButton) {
+                    innerButton.click();
+                    BotManager.log('Clicked play again app-juicy-button: "' + buttonText + '"');
+                    return true;
+                }
+            }
+        }
+
+        // Legacy selectors for backwards compatibility
+        var legacySelectors = [
+            'button.btn.btn-secondary.mt-2.ng-star-inserted',
+            'app-re-match button',
+            'app-re-match div button',
+            'button[class*="btn-secondary"]',
+            'button[class*="ng-star-inserted"]'
+        ];
+
+        for (var l = 0; l < legacySelectors.length; l++) {
+            var buttons = document.querySelectorAll(legacySelectors[l]);
+            BotManager.log('Legacy selector "' + legacySelectors[l] + '" found ' + buttons.length + ' buttons');
+
+            for (var m = 0; m < buttons.length; m++) {
+                var button = buttons[m];
+                var buttonText = button.textContent.toLowerCase().trim();
+
+                if (buttonText.includes('play') && buttonText.includes('again')) {
+                    button.click();
+                    BotManager.log('Clicked play again button using legacy selector: "' + buttonText + '"');
+                    return true;
+                }
+            }
+        }
+
+        // Final fallback - search all buttons
+        var allButtons = document.querySelectorAll('button');
+        BotManager.log('Final fallback: searching all ' + allButtons.length + ' buttons on page');
+
+        for (var n = 0; n < allButtons.length; n++) {
+            var button = allButtons[n];
+            var text = button.textContent.toLowerCase().trim();
+
+            if (text.includes('play') && text.includes('again')) {
+                button.click();
+                BotManager.log('Clicked play again button found by text search: "' + text + '"');
+                return true;
+            }
+        }
+
+        BotManager.log('Play again button not found with any method', 'WARN');
+
+        // Enhanced debug info for app-juicy-button
+        BotManager.log('=== DEBUG: App-juicy-button components ===');
+        var debugJuicy = document.querySelectorAll('app-juicy-button');
+        for (var o = 0; o < debugJuicy.length; o++) {
+            var juicy = debugJuicy[o];
+            BotManager.log('Juicy ' + o + ': "' + juicy.textContent.trim() + '" classes: ' + juicy.className);
+        }
+
+        return false;
+    }
+
+    // Initialize BotManager
+    BotManager.init();
 
     // Check if username is stored in GM storage
     GM.getValue('username').then(function(username) {
@@ -169,6 +1462,26 @@
         depthSliderTab.style.padding = '5px 0';
         depthSliderTab.style.cursor = 'pointer';
 
+        // Create the "Auto Play Control" tab
+        var autoPlayTab = document.createElement('div');
+        autoPlayTab.textContent = 'Auto Play Control';
+        autoPlayTab.style.padding = '5px 0';
+        autoPlayTab.style.cursor = 'pointer';
+        autoPlayTab.style.color = '#18bc9c';
+        autoPlayTab.style.fontWeight = 'bold';
+
+        // Create the "Detection Settings" tab
+        var detectionTab = document.createElement('div');
+        detectionTab.textContent = 'Detection Settings';
+        detectionTab.style.padding = '5px 0';
+        detectionTab.style.cursor = 'pointer';
+
+        // Create the "Game Strategy" tab
+        var strategyTab = document.createElement('div');
+        strategyTab.textContent = 'Game Strategy';
+        strategyTab.style.padding = '5px 0';
+        strategyTab.style.cursor = 'pointer';
+
         // Create the settings for "Auto Queue"
         var autoQueueSettings = document.createElement('div');
         autoQueueSettings.textContent = 'Auto Queue Settings';
@@ -190,7 +1503,7 @@
         });
 
         // Add event listener to the depth slider
-        depthSlider.addEventListener('input', function(event) {
+        depthSlider.addEventListener('input', function() {
             var depth = Math.round(depthSlider.value);
             GM.setValue('depth', depth.toString());
 
@@ -229,6 +1542,451 @@
         // Append the depth slider to the "Depth Slider" settings
         depthSliderSettings.appendChild(depthSlider);
 
+        // Create Auto Play Control Settings
+        var autoPlaySettings = document.createElement('div');
+        autoPlaySettings.style.display = 'none';
+        autoPlaySettings.style.padding = '10px';
+
+        // Master Auto-Play Toggle
+        var autoPlayToggle = document.createElement('button');
+        autoPlayToggle.textContent = 'Auto-Play: OFF';
+        autoPlayToggle.classList.add('btn', 'btn-secondary', 'mb-2', 'ng-star-inserted');
+        autoPlayToggle.style.backgroundColor = 'red';
+        autoPlayToggle.style.color = 'white';
+        autoPlayToggle.style.width = '100%';
+        autoPlayToggle.style.marginBottom = '10px';
+
+        autoPlayToggle.addEventListener('click', function() {
+            BotManager.isAutoPlayEnabled = !BotManager.isAutoPlayEnabled;
+            BotManager.saveSettings();
+            updateAutoPlayDisplay();
+        });
+
+        // Status Display
+        var statusDisplay = document.createElement('div');
+        statusDisplay.style.backgroundColor = '#2c3e50';
+        statusDisplay.style.color = 'white';
+        statusDisplay.style.padding = '8px';
+        statusDisplay.style.borderRadius = '5px';
+        statusDisplay.style.marginBottom = '10px';
+        statusDisplay.style.fontSize = '12px';
+
+        // Loss Counter Display
+        var lossDisplay = document.createElement('div');
+        lossDisplay.style.backgroundColor = '#e74c3c';
+        lossDisplay.style.color = 'white';
+        lossDisplay.style.padding = '5px';
+        lossDisplay.style.borderRadius = '3px';
+        lossDisplay.style.marginBottom = '10px';
+        lossDisplay.style.textAlign = 'center';
+
+        // Loss Reset Button
+        var lossResetBtn = document.createElement('button');
+        lossResetBtn.textContent = 'Reset Losses';
+        lossResetBtn.classList.add('btn', 'btn-warning', 'btn-sm');
+        lossResetBtn.style.width = '100%';
+        lossResetBtn.style.marginBottom = '10px';
+
+        lossResetBtn.addEventListener('click', function() {
+            if (confirm('Reset loss counter to 0?')) {
+                BotManager.totalLosses = 0;
+                BotManager.isAutoPlayEnabled = true;
+                BotManager.saveSettings();
+                updateAutoPlayDisplay();
+            }
+        });
+
+        // Emergency Stop Button
+        var emergencyStop = document.createElement('button');
+        emergencyStop.textContent = '🛑 EMERGENCY STOP';
+        emergencyStop.classList.add('btn', 'btn-danger');
+        emergencyStop.style.width = '100%';
+        emergencyStop.style.fontWeight = 'bold';
+
+        emergencyStop.addEventListener('click', function() {
+            BotManager.isAutoPlayEnabled = false;
+            BotManager.currentOpponentType = 'unknown';
+            BotManager.currentGameCount = 0;
+            GameManager.gameInProgress = false;
+            BotManager.saveSettings();
+            updateAutoPlayDisplay();
+            BotManager.log('EMERGENCY STOP activated', 'WARN');
+        });
+
+        // Safety Reset Button
+        var safetyReset = document.createElement('button');
+        safetyReset.textContent = '🔧 Reset Safety';
+        safetyReset.classList.add('btn', 'btn-success');
+        safetyReset.style.width = '100%';
+        safetyReset.style.fontWeight = 'bold';
+        safetyReset.style.marginTop = '5px';
+
+        safetyReset.addEventListener('click', function() {
+            if (confirm('Reset all safety systems and error counters?')) {
+                SafetyManager.resetErrorCount();
+                BotManager.totalLosses = 0;
+                BotManager.isAutoPlayEnabled = true;
+                BotManager.currentOpponentType = 'unknown';
+                BotManager.currentGameCount = 0;
+                GameManager.gameInProgress = false;
+                BotManager.saveSettings();
+                updateAutoPlayDisplay();
+                BotManager.log('Safety systems reset', 'SUCCESS');
+            }
+        });
+
+        // Update display function
+        function updateAutoPlayDisplay() {
+            autoPlayToggle.textContent = BotManager.isAutoPlayEnabled ? 'Auto-Play: ON' : 'Auto-Play: OFF';
+            autoPlayToggle.style.backgroundColor = BotManager.isAutoPlayEnabled ? 'green' : 'red';
+
+            var runtime = BotManager.getRuntime();
+            var opponentInfo = BotManager.currentOpponentType === 'unknown' ? 'Detecting...' :
+                              BotManager.currentOpponentType + ' (' + BotManager.currentGameCount + '/' +
+                              (BotManager.currentOpponentType === 'bot' ? BotManager.gamesPerBot : BotManager.gamesPerHuman) + ')';
+
+            // Update opponent name detection (only when in game or when we don't have a name)
+            if (isInGame() || BotManager.currentOpponentName === 'Unknown') {
+                BotManager.detectOpponentName();
+            }
+
+            var opponentNameDisplay = BotManager.currentOpponentName !== 'Unknown' ?
+                                    BotManager.currentOpponentName : 'Not detected';
+
+            // Add color coding for opponent name
+            var nameColor = '#ffffff'; // default white
+            if (BotManager.currentOpponentName !== 'Unknown' && BotManager.currentOpponentName !== 'Not detected') {
+                // Check if it's a known bot
+                var isKnownBot = false;
+                for (var i = 0; i < BotManager.knownBotNames.length; i++) {
+                    if (BotManager.knownBotNames[i].toLowerCase() === BotManager.currentOpponentName.toLowerCase()) {
+                        isKnownBot = true;
+                        break;
+                    }
+                }
+                nameColor = isKnownBot ? '#2ecc71' : '#f39c12'; // green for bots, orange for humans
+            }
+
+            statusDisplay.innerHTML =
+                '<strong>Status:</strong> ' + (BotManager.isAutoPlayEnabled ? 'Active' : 'Stopped') + '<br>' +
+                '<strong>Runtime:</strong> ' + runtime + '<br>' +
+                '<strong>Opponent:</strong> ' + opponentInfo + '<br>' +
+                '<strong>Name:</strong> <span style="color: ' + nameColor + '; font-weight: bold;">' + opponentNameDisplay + '</span><br>' +
+                '<strong>Game:</strong> ' + ((GameManager && GameManager.gameInProgress) ? 'In Progress' : 'Waiting');
+
+            lossDisplay.textContent = 'Losses: ' + BotManager.totalLosses + '/' + BotManager.maxLosses;
+
+            if (BotManager.totalLosses >= BotManager.maxLosses) {
+                lossDisplay.style.backgroundColor = '#c0392b';
+                lossDisplay.innerHTML += '<br>LIMIT REACHED!';
+            }
+        }
+
+        // Initial display update
+        updateAutoPlayDisplay();
+
+        // Update display every 2 seconds
+        setInterval(updateAutoPlayDisplay, 2000);
+
+        // Debug Button
+        var debugBtn = document.createElement('button');
+        debugBtn.textContent = '🔍 Debug State';
+        debugBtn.classList.add('btn', 'btn-info');
+        debugBtn.style.width = '100%';
+        debugBtn.style.marginTop = '5px';
+        debugBtn.style.fontSize = '12px';
+
+        debugBtn.addEventListener('click', function() {
+            debugGameState();
+            debugPlayAgainButtons();
+        });
+
+        autoPlaySettings.appendChild(autoPlayToggle);
+        autoPlaySettings.appendChild(statusDisplay);
+        autoPlaySettings.appendChild(lossDisplay);
+        autoPlaySettings.appendChild(lossResetBtn);
+        autoPlaySettings.appendChild(emergencyStop);
+        autoPlaySettings.appendChild(safetyReset);
+        autoPlaySettings.appendChild(debugBtn);
+
+        // Create Detection Settings
+        var detectionSettings = document.createElement('div');
+        detectionSettings.style.display = 'none';
+        detectionSettings.style.padding = '10px';
+
+        // Detection Sensitivity Slider
+        var sensitivityLabel = document.createElement('div');
+        sensitivityLabel.textContent = 'Detection Sensitivity:';
+        sensitivityLabel.style.marginBottom = '5px';
+        sensitivityLabel.style.color = 'white';
+
+        var sensitivitySlider = document.createElement('input');
+        sensitivitySlider.type = 'range';
+        sensitivitySlider.min = '1';
+        sensitivitySlider.max = '3';
+        sensitivitySlider.value = BotManager.detectionSensitivity === 'conservative' ? '1' :
+                                  BotManager.detectionSensitivity === 'balanced' ? '2' : '3';
+        sensitivitySlider.style.width = '100%';
+        sensitivitySlider.style.marginBottom = '10px';
+
+        var sensitivityDisplay = document.createElement('div');
+        sensitivityDisplay.style.textAlign = 'center';
+        sensitivityDisplay.style.color = '#18bc9c';
+        sensitivityDisplay.style.marginBottom = '15px';
+
+        function updateSensitivityDisplay() {
+            var labels = ['Conservative', 'Balanced', 'Aggressive'];
+            sensitivityDisplay.textContent = labels[sensitivitySlider.value - 1];
+        }
+        updateSensitivityDisplay();
+
+        sensitivitySlider.addEventListener('input', function() {
+            var settings = ['conservative', 'balanced', 'aggressive'];
+            BotManager.detectionSensitivity = settings[sensitivitySlider.value - 1];
+            BotManager.saveSettings();
+            updateSensitivityDisplay();
+        });
+
+        // Manual Override Buttons
+        var overrideLabel = document.createElement('div');
+        overrideLabel.textContent = 'Manual Override:';
+        overrideLabel.style.marginBottom = '5px';
+        overrideLabel.style.color = 'white';
+
+        var overrideContainer = document.createElement('div');
+        overrideContainer.style.display = 'flex';
+        overrideContainer.style.gap = '5px';
+        overrideContainer.style.marginBottom = '15px';
+
+        var forceBotBtn = document.createElement('button');
+        forceBotBtn.textContent = 'Force Bot';
+        forceBotBtn.classList.add('btn', 'btn-info', 'btn-sm');
+        forceBotBtn.style.flex = '1';
+
+        forceBotBtn.addEventListener('click', function() {
+            BotManager.currentOpponentType = 'bot';
+            BotManager.currentGameCount = 0;
+            BotManager.saveSettings();
+            BotManager.log('Manually set opponent as bot');
+        });
+
+        var forceHumanBtn = document.createElement('button');
+        forceHumanBtn.textContent = 'Force Human';
+        forceHumanBtn.classList.add('btn', 'btn-info', 'btn-sm');
+        forceHumanBtn.style.flex = '1';
+
+        forceHumanBtn.addEventListener('click', function() {
+            BotManager.currentOpponentType = 'human';
+            BotManager.currentGameCount = 0;
+            BotManager.saveSettings();
+            BotManager.log('Manually set opponent as human');
+        });
+
+        overrideContainer.appendChild(forceBotBtn);
+        overrideContainer.appendChild(forceHumanBtn);
+
+        // Detection History Display
+        var historyLabel = document.createElement('div');
+        historyLabel.textContent = 'Recent Detections:';
+        historyLabel.style.marginBottom = '5px';
+        historyLabel.style.color = 'white';
+
+        var historyDisplay = document.createElement('div');
+        historyDisplay.style.backgroundColor = '#2c3e50';
+        historyDisplay.style.color = 'white';
+        historyDisplay.style.padding = '8px';
+        historyDisplay.style.borderRadius = '5px';
+        historyDisplay.style.fontSize = '11px';
+        historyDisplay.style.maxHeight = '100px';
+        historyDisplay.style.overflowY = 'auto';
+
+        function updateDetectionHistory() {
+            var recent = BotManager.detectionHistory.slice(-5).reverse();
+            if (recent.length === 0) {
+                historyDisplay.innerHTML = 'No detections yet';
+                return;
+            }
+
+            var html = recent.map(function(detection) {
+                var time = new Date(detection.timestamp).toLocaleTimeString();
+                var confidence = (detection.confidence * 100).toFixed(0);
+                return time + ': ' + detection.opponent + ' → ' + detection.type + ' (' + confidence + '%)';
+            }).join('<br>');
+
+            historyDisplay.innerHTML = html;
+        }
+
+        updateDetectionHistory();
+        setInterval(updateDetectionHistory, 3000);
+
+        // Known Bots Display
+        var knownBotsLabel = document.createElement('div');
+        knownBotsLabel.textContent = 'Known Bot Names:';
+        knownBotsLabel.style.marginBottom = '5px';
+        knownBotsLabel.style.marginTop = '15px';
+        knownBotsLabel.style.color = 'white';
+
+        var knownBotsDisplay = document.createElement('div');
+        knownBotsDisplay.style.backgroundColor = '#2c3e50';
+        knownBotsDisplay.style.color = '#18bc9c';
+        knownBotsDisplay.style.padding = '8px';
+        knownBotsDisplay.style.borderRadius = '5px';
+        knownBotsDisplay.style.fontSize = '11px';
+        knownBotsDisplay.style.maxHeight = '80px';
+        knownBotsDisplay.style.overflowY = 'auto';
+        knownBotsDisplay.innerHTML = BotManager.knownBotNames.join(', ');
+
+        detectionSettings.appendChild(sensitivityLabel);
+        detectionSettings.appendChild(sensitivitySlider);
+        detectionSettings.appendChild(sensitivityDisplay);
+        detectionSettings.appendChild(overrideLabel);
+        detectionSettings.appendChild(overrideContainer);
+        detectionSettings.appendChild(historyLabel);
+        detectionSettings.appendChild(historyDisplay);
+        detectionSettings.appendChild(knownBotsLabel);
+        detectionSettings.appendChild(knownBotsDisplay);
+
+        // Create Game Strategy Settings
+        var strategySettings = document.createElement('div');
+        strategySettings.style.display = 'none';
+        strategySettings.style.padding = '10px';
+
+        // Games per Bot setting
+        var botGamesLabel = document.createElement('div');
+        botGamesLabel.textContent = 'Games vs Bots:';
+        botGamesLabel.style.marginBottom = '5px';
+        botGamesLabel.style.color = 'white';
+
+        var botGamesInput = document.createElement('input');
+        botGamesInput.type = 'number';
+        botGamesInput.min = '1';
+        botGamesInput.max = '20';
+        botGamesInput.value = BotManager.gamesPerBot;
+        botGamesInput.style.width = '100%';
+        botGamesInput.style.marginBottom = '10px';
+        botGamesInput.style.padding = '5px';
+        botGamesInput.style.borderRadius = '3px';
+        botGamesInput.style.border = '1px solid #ccc';
+
+        botGamesInput.addEventListener('change', function() {
+            BotManager.gamesPerBot = parseInt(botGamesInput.value) || 7;
+            BotManager.saveSettings();
+        });
+
+        // Games per Human setting
+        var humanGamesLabel = document.createElement('div');
+        humanGamesLabel.textContent = 'Games vs Humans:';
+        humanGamesLabel.style.marginBottom = '5px';
+        humanGamesLabel.style.color = 'white';
+
+        var humanGamesInput = document.createElement('input');
+        humanGamesInput.type = 'number';
+        humanGamesInput.min = '1';
+        humanGamesInput.max = '5';
+        humanGamesInput.value = BotManager.gamesPerHuman;
+        humanGamesInput.style.width = '100%';
+        humanGamesInput.style.marginBottom = '10px';
+        humanGamesInput.style.padding = '5px';
+        humanGamesInput.style.borderRadius = '3px';
+        humanGamesInput.style.border = '1px solid #ccc';
+
+        humanGamesInput.addEventListener('change', function() {
+            BotManager.gamesPerHuman = parseInt(humanGamesInput.value) || 1;
+            BotManager.saveSettings();
+        });
+
+        // Max Losses setting
+        var maxLossesLabel = document.createElement('div');
+        maxLossesLabel.textContent = 'Maximum Losses:';
+        maxLossesLabel.style.marginBottom = '5px';
+        maxLossesLabel.style.color = 'white';
+
+        var maxLossesInput = document.createElement('input');
+        maxLossesInput.type = 'number';
+        maxLossesInput.min = '1';
+        maxLossesInput.max = '50';
+        maxLossesInput.value = BotManager.maxLosses;
+        maxLossesInput.style.width = '100%';
+        maxLossesInput.style.marginBottom = '15px';
+        maxLossesInput.style.padding = '5px';
+        maxLossesInput.style.borderRadius = '3px';
+        maxLossesInput.style.border = '1px solid #ccc';
+
+        maxLossesInput.addEventListener('change', function() {
+            BotManager.maxLosses = parseInt(maxLossesInput.value) || 5;
+            BotManager.saveSettings();
+        });
+
+        // Performance Stats
+        var statsLabel = document.createElement('div');
+        statsLabel.textContent = 'Session Stats:';
+        statsLabel.style.marginBottom = '5px';
+        statsLabel.style.color = 'white';
+
+        var statsDisplay = document.createElement('div');
+        statsDisplay.style.backgroundColor = '#2c3e50';
+        statsDisplay.style.color = 'white';
+        statsDisplay.style.padding = '8px';
+        statsDisplay.style.borderRadius = '5px';
+        statsDisplay.style.fontSize = '12px';
+
+        function updateStats() {
+            var totalGames = BotManager.gameResults.length;
+            var wins = BotManager.gameResults.filter(function(r) { return r.result === 'win'; }).length;
+            var losses = BotManager.gameResults.filter(function(r) { return r.result === 'loss'; }).length;
+            var draws = BotManager.gameResults.filter(function(r) { return r.result === 'draw'; }).length;
+            var winRate = totalGames > 0 ? ((wins / totalGames) * 100).toFixed(1) : '0';
+
+            statsDisplay.innerHTML =
+                '<strong>Total Games:</strong> ' + totalGames + '<br>' +
+                '<strong>Wins:</strong> ' + wins + ' | <strong>Losses:</strong> ' + losses + ' | <strong>Draws:</strong> ' + draws + '<br>' +
+                '<strong>Win Rate:</strong> ' + winRate + '%<br>' +
+                '<strong>Runtime:</strong> ' + BotManager.getRuntime();
+        }
+
+        updateStats();
+        setInterval(updateStats, 5000);
+
+        // Export Logs Button
+        var exportBtn = document.createElement('button');
+        exportBtn.textContent = '📥 Export Logs';
+        exportBtn.classList.add('btn', 'btn-info', 'btn-sm');
+        exportBtn.style.width = '100%';
+        exportBtn.style.marginBottom = '10px';
+
+        exportBtn.addEventListener('click', function() {
+            BotManager.exportLogs();
+        });
+
+        // Real-time Log Display
+        var logLabel = document.createElement('div');
+        logLabel.textContent = 'Recent Activity:';
+        logLabel.style.marginBottom = '5px';
+        logLabel.style.color = 'white';
+
+        var logDisplay = document.createElement('div');
+        logDisplay.id = 'bot-log-display';
+        logDisplay.style.backgroundColor = '#2c3e50';
+        logDisplay.style.color = 'white';
+        logDisplay.style.padding = '8px';
+        logDisplay.style.borderRadius = '5px';
+        logDisplay.style.fontSize = '10px';
+        logDisplay.style.maxHeight = '120px';
+        logDisplay.style.overflowY = 'auto';
+        logDisplay.style.fontFamily = 'monospace';
+
+        strategySettings.appendChild(botGamesLabel);
+        strategySettings.appendChild(botGamesInput);
+        strategySettings.appendChild(humanGamesLabel);
+        strategySettings.appendChild(humanGamesInput);
+        strategySettings.appendChild(maxLossesLabel);
+        strategySettings.appendChild(maxLossesInput);
+        strategySettings.appendChild(statsLabel);
+        strategySettings.appendChild(statsDisplay);
+        strategySettings.appendChild(exportBtn);
+        strategySettings.appendChild(logLabel);
+        strategySettings.appendChild(logDisplay);
+
         // Create the settings for "Auto Queue"
         var autoQueueSettings = document.createElement('div');
         autoQueueSettings.style.padding = '10px';
@@ -257,29 +2015,41 @@
             autoQueueToggleButton.style.backgroundColor = isAutoQueueOn ? 'green' : 'red';
         }
 
-        function clickLeaveRoomButton() {
-            var leaveRoomButton = document.querySelector("button.btn-light.ng-tns-c189-7");
-            if (leaveRoomButton) {
-                leaveRoomButton.click();
-            }
-        }
 
-        function clickPlayOnlineButton() {
-            var playOnlineButton = document.querySelector("button.btn-secondary.flex-grow-1");
-            if (playOnlineButton) {
-                playOnlineButton.click();
-            }
-        }
 
-        // Periodically check for buttons when the toggle is on
+
+
+        // Enhanced periodic checking with smart logic
         function checkButtonsPeriodically() {
-            if (isAutoQueueOn) {
+            // Use old auto-queue if new auto-play is disabled
+            if (isAutoQueueOn && !BotManager.isAutoPlayEnabled) {
                 clickLeaveRoomButton();
                 clickPlayOnlineButton();
             }
+
+            // New auto-play system - more aggressive play online clicking
+            if (BotManager.isAutoPlayEnabled && !isInGame()) {
+                // Check for play online button and click it
+                var playOnlineSelectors = [
+                    "button.btn-secondary.flex-grow-1",
+                    "body > app-root > app-navigation > div.d-flex.h-100 > div.d-flex.flex-column.h-100.w-100 > main > app-game-landing > div > div > div > div.col-12.col-lg-9.dashboard > div.card.area-buttons.d-flex.justify-content-center.align-items-center.flex-column > button.btn.btn-secondary.btn-lg.position-relative",
+                    "button.btn.btn-secondary.btn-lg.position-relative",
+                    "button[class*='btn-secondary'][class*='btn-lg']"
+                ];
+
+                for (var i = 0; i < playOnlineSelectors.length; i++) {
+                    var playButton = document.querySelector(playOnlineSelectors[i]);
+                    if (playButton && (playButton.textContent.toLowerCase().includes('play') ||
+                                      playButton.textContent.toLowerCase().includes('online'))) {
+                        playButton.click();
+                        BotManager.log('Auto-clicked play online button');
+                        break;
+                    }
+                }
+            }
         }
 
-        // Set up periodic checking
+        // Set up periodic checking - more frequent for auto-play
         setInterval(checkButtonsPeriodically, 1000);
 
         //------------------------------------------------------------------------Testing Purposes
@@ -315,23 +2085,50 @@
         // Append the toggle button to the "Auto Queue" settings
         autoQueueSettings.appendChild(autoQueueToggleButton);
 
+        // Function to hide all settings panels
+        function hideAllSettings() {
+            autoQueueSettings.style.display = 'none';
+            depthSliderSettings.style.display = 'none';
+            autoPlaySettings.style.display = 'none';
+            detectionSettings.style.display = 'none';
+            strategySettings.style.display = 'none';
+            autoQueueToggleButton.style.display = 'none';
+        }
+
         // Add event listeners to the tabs to toggle their respective settings
         autoQueueTab.addEventListener('click', function() {
-            // Hide the depth slider settings
-            depthSliderSettings.style.display = 'none';
-            // Show the auto queue settings
+            hideAllSettings();
             autoQueueSettings.style.display = 'block';
             autoQueueToggleButton.style.display = 'block';
         });
 
         depthSliderTab.addEventListener('click', function() {
-            // Hide the auto queue settings
-            autoQueueSettings.style.display = 'none';
-            // Show the depth slider settings
+            hideAllSettings();
             depthSliderSettings.style.display = 'block';
         });
 
+        autoPlayTab.addEventListener('click', function() {
+            hideAllSettings();
+            autoPlaySettings.style.display = 'block';
+        });
+
+        detectionTab.addEventListener('click', function() {
+            hideAllSettings();
+            detectionSettings.style.display = 'block';
+        });
+
+        strategyTab.addEventListener('click', function() {
+            hideAllSettings();
+            strategySettings.style.display = 'block';
+        });
+
         // Append the tabs and settings to the dropdown content
+        dropdownContent.appendChild(autoPlayTab);
+        dropdownContent.appendChild(autoPlaySettings);
+        dropdownContent.appendChild(detectionTab);
+        dropdownContent.appendChild(detectionSettings);
+        dropdownContent.appendChild(strategyTab);
+        dropdownContent.appendChild(strategySettings);
         dropdownContent.appendChild(autoQueueTab);
         dropdownContent.appendChild(autoQueueSettings);
         dropdownContent.appendChild(depthSliderTab);
@@ -352,6 +2149,159 @@
 
         // Append the dropdown container to the document body
         document.body.appendChild(dropdownContainer);
+    })();
+
+    // Create Persistent Status Bar
+    (function() {
+        'use strict';
+
+        var statusBar = document.createElement('div');
+        statusBar.id = 'bot-status-bar';
+        statusBar.style.position = 'fixed';
+        statusBar.style.top = '10px';
+        statusBar.style.right = '10px';
+        statusBar.style.backgroundColor = 'rgba(27, 40, 55, 0.95)';
+        statusBar.style.border = '2px solid #18bc9c';
+        statusBar.style.borderRadius = '8px';
+        statusBar.style.padding = '10px';
+        statusBar.style.color = 'white';
+        statusBar.style.fontSize = '12px';
+        statusBar.style.fontFamily = 'monospace';
+        statusBar.style.zIndex = '9997';
+        statusBar.style.minWidth = '200px';
+        statusBar.style.boxShadow = '0 4px 8px rgba(0,0,0,0.3)';
+
+        // Status content container
+        var statusContent = document.createElement('div');
+        statusContent.style.marginBottom = '8px';
+
+        // Bot thinking display
+        var thinkingDisplay = document.createElement('div');
+        thinkingDisplay.id = 'bot-thinking-display';
+        thinkingDisplay.style.backgroundColor = 'rgba(52, 152, 219, 0.1)';
+        thinkingDisplay.style.border = '1px solid #3498db';
+        thinkingDisplay.style.borderRadius = '4px';
+        thinkingDisplay.style.padding = '6px';
+        thinkingDisplay.style.marginBottom = '8px';
+        thinkingDisplay.style.fontSize = '11px';
+        thinkingDisplay.innerHTML =
+            '<div style="color: #3498db; font-weight: bold;">🤖 Initializing...</div>' +
+            '<div style="color: #2ecc71; font-size: 10px; margin-top: 3px;">➤ Starting up systems</div>';
+
+        // Quick controls container
+        var quickControls = document.createElement('div');
+        quickControls.style.display = 'flex';
+        quickControls.style.gap = '5px';
+
+        // Quick start/stop button
+        var quickToggle = document.createElement('button');
+        quickToggle.textContent = '▶';
+        quickToggle.style.padding = '2px 6px';
+        quickToggle.style.fontSize = '10px';
+        quickToggle.style.border = 'none';
+        quickToggle.style.borderRadius = '3px';
+        quickToggle.style.cursor = 'pointer';
+        quickToggle.style.backgroundColor = '#e74c3c';
+        quickToggle.style.color = 'white';
+
+        quickToggle.addEventListener('click', function() {
+            BotManager.isAutoPlayEnabled = !BotManager.isAutoPlayEnabled;
+            BotManager.saveSettings();
+            updateStatusBar();
+        });
+
+        // Quick reset button
+        var quickReset = document.createElement('button');
+        quickReset.textContent = '🔄';
+        quickReset.style.padding = '2px 6px';
+        quickReset.style.fontSize = '10px';
+        quickReset.style.border = 'none';
+        quickReset.style.borderRadius = '3px';
+        quickReset.style.cursor = 'pointer';
+        quickReset.style.backgroundColor = '#f39c12';
+        quickReset.style.color = 'white';
+
+        quickReset.addEventListener('click', function() {
+            BotManager.currentOpponentType = 'unknown';
+            BotManager.currentGameCount = 0;
+            GameManager.gameInProgress = false;
+            BotManager.saveSettings();
+            updateStatusBar();
+        });
+
+        quickControls.appendChild(quickToggle);
+        quickControls.appendChild(quickReset);
+
+        statusBar.appendChild(thinkingDisplay);
+        statusBar.appendChild(statusContent);
+        statusBar.appendChild(quickControls);
+        document.body.appendChild(statusBar);
+
+        // Update status bar function
+        function updateStatusBar() {
+            var autoPlayStatus = BotManager.isAutoPlayEnabled ?
+                '<span style="color: #2ecc71;">●</span> ACTIVE' :
+                '<span style="color: #e74c3c;">●</span> STOPPED';
+
+            var opponentStatus = BotManager.currentOpponentType === 'unknown' ?
+                '<span style="color: #f39c12;">Detecting...</span>' :
+                '<span style="color: #3498db;">' + BotManager.currentOpponentType.toUpperCase() + '</span>';
+
+            var gameProgress = '';
+            if (BotManager.currentOpponentType !== 'unknown') {
+                var maxGames = BotManager.currentOpponentType === 'bot' ? BotManager.gamesPerBot : BotManager.gamesPerHuman;
+                gameProgress = ' (' + BotManager.currentGameCount + '/' + maxGames + ')';
+            }
+
+            var gameStatus = (GameManager && GameManager.gameInProgress) ?
+                '<span style="color: #2ecc71;">Playing</span>' :
+                '<span style="color: #95a5a6;">Waiting</span>';
+
+            var lossStatus = BotManager.totalLosses >= BotManager.maxLosses ?
+                '<span style="color: #e74c3c; font-weight: bold;">LIMIT REACHED!</span>' :
+                '<span style="color: #f39c12;">' + BotManager.totalLosses + '/' + BotManager.maxLosses + '</span>';
+
+            statusContent.innerHTML =
+                '<div><strong>Auto-Play:</strong> ' + autoPlayStatus + '</div>' +
+                '<div><strong>Opponent:</strong> ' + opponentStatus + gameProgress + '</div>' +
+                '<div><strong>Game:</strong> ' + gameStatus + '</div>' +
+                '<div><strong>Losses:</strong> ' + lossStatus + '</div>' +
+                '<div><strong>Runtime:</strong> ' + BotManager.getRuntime() + '</div>';
+
+            // Update quick toggle button
+            quickToggle.textContent = BotManager.isAutoPlayEnabled ? '⏸' : '▶';
+            quickToggle.style.backgroundColor = BotManager.isAutoPlayEnabled ? '#e74c3c' : '#2ecc71';
+        }
+
+        // Initial update and set interval
+        updateStatusBar();
+        setInterval(updateStatusBar, 1000);
+
+        // Make status bar draggable
+        var isDragging = false;
+        var dragOffset = { x: 0, y: 0 };
+
+        statusBar.addEventListener('mousedown', function(e) {
+            if (e.target === statusBar || e.target === statusContent) {
+                isDragging = true;
+                dragOffset.x = e.clientX - statusBar.offsetLeft;
+                dragOffset.y = e.clientY - statusBar.offsetTop;
+                statusBar.style.cursor = 'grabbing';
+            }
+        });
+
+        document.addEventListener('mousemove', function(e) {
+            if (isDragging) {
+                statusBar.style.left = (e.clientX - dragOffset.x) + 'px';
+                statusBar.style.top = (e.clientY - dragOffset.y) + 'px';
+                statusBar.style.right = 'auto';
+            }
+        });
+
+        document.addEventListener('mouseup', function() {
+            isDragging = false;
+            statusBar.style.cursor = 'default';
+        });
     })();
 
     //------------------------------------------------
@@ -476,23 +2426,44 @@
     var player;
 
     function initGame() {
+        var ticTacToeBoard = document.getElementById('tic-tac-toe-board');
+        if (!ticTacToeBoard) {
+            // Board doesn't exist yet, try again later
+            setTimeout(initGame, 1000);
+            return;
+        }
+
         var observer = new MutationObserver(function(mutations) {
             mutations.forEach(function(mutation) {
-                if (mutation.target.id === 'tic-tac-toe-board') {
+                if (mutation.target.id === 'tic-tac-toe-board' && isInGame()) {
                     initAITurn();
                 }
             });
         });
 
-        observer.observe(document.getElementById('tic-tac-toe-board'), { attributes: true, childList: true, subtree: true });
+        observer.observe(ticTacToeBoard, { attributes: true, childList: true, subtree: true });
+        BotManager.log('Game observer initialized');
     }
 
 
     function initAITurn() {
+        // Only proceed if we're actually in a game
+        if (!isInGame()) {
+            return;
+        }
+
         displayBoardAndPlayer();
         var boardState = getBoardState();
+
+        // Additional safety check
+        if (!boardState) {
+            return;
+        }
+
         var bestMove = findBestMove(boardState, player);
-        updateBoard(bestMove.row.toString() + bestMove.col.toString());
+        if (bestMove && bestMove.row !== -1 && bestMove.col !== -1) {
+            updateBoard(bestMove.row.toString() + bestMove.col.toString());
+        }
     }
 
     function findBestMove(board, player) {
@@ -522,12 +2493,20 @@
     }
 
     function displayBoardAndPlayer() {
+        if (!isInGame()) {
+            return;
+        }
+
         var boardState = getBoardState();
+        if (!boardState) {
+            return;
+        }
+
         console.log("Board State:");
         boardState.forEach(function(row) {
             console.log(row.join(' | '));
         });
-        
+
         // Display opponent name in console
         displayOpponentName();
     }
@@ -536,17 +2515,38 @@
         GM.getValue("username").then(function(username) {
             var profileOpeners = document.querySelectorAll(".text-truncate.cursor-pointer");
             var opponentName = null;
-            
+
             profileOpeners.forEach(function(opener) {
                 if (opener.textContent.trim() !== username) {
                     opponentName = opener.textContent.trim();
                 }
             });
-            
+
             if (opponentName) {
                 console.log("Opponent: " + opponentName);
+
+                // Enhanced opponent detection for auto-play
+                if (BotManager.isAutoPlayEnabled && BotManager.currentOpponentType === 'unknown') {
+                    // Use the opponent name for immediate detection
+                    var detectedType = BotManager.detectOpponentType(opponentName, null);
+                    BotManager.currentOpponentType = detectedType;
+                    BotManager.currentGameCount = 0; // Reset game count for new opponent
+                    BotManager.saveSettings();
+
+                    BotManager.log('Opponent detected: ' + opponentName + ' -> ' + detectedType, 'SUCCESS');
+
+                    // Start game tracking
+                    if (!GameManager.gameInProgress) {
+                        GameManager.startGame();
+                    }
+                }
             } else {
                 console.log("Opponent name not found");
+                // Debug: log all profile elements found
+                BotManager.log('Profile elements found: ' + profileOpeners.length);
+                profileOpeners.forEach(function(opener, index) {
+                    BotManager.log('Profile ' + index + ': "' + opener.textContent.trim() + '"');
+                });
             }
         });
     }
@@ -641,8 +2641,507 @@
         return false;
     }
 
+    // Game End Detection System
+    var GameEndDetector = {
+        lastBoardState: null,
+        gameEndChecked: false,
+
+        // Check if game has ended and determine result
+        checkGameEnd: function() {
+            if (!BotManager.isAutoPlayEnabled || !GameManager.gameInProgress || !isInGame()) return;
+
+            var currentBoard = getBoardState();
+            if (!currentBoard) return;
+
+            var boardString = JSON.stringify(currentBoard);
+
+            // Only check if board has changed
+            if (this.lastBoardState === boardString) return;
+            this.lastBoardState = boardString;
+
+            var gameResult = this.analyzeGameResult(currentBoard);
+            if (gameResult !== 'ongoing') {
+                this.gameEndChecked = true;
+                BotManager.log('Game end detected: ' + gameResult);
+                GameManager.endGame(gameResult);
+            }
+        },
+
+        // Analyze current board to determine game result
+        analyzeGameResult: function(board) {
+            var score = evaluateBoard(board);
+
+            if (score === 10) {
+                return 'win'; // AI won
+            } else if (score === -10) {
+                return 'loss'; // AI lost
+            } else if (!areMovesLeft(board)) {
+                return 'draw'; // Draw
+            }
+
+            // Check for game end UI elements
+            var gameEndElements = [
+                document.querySelector('.game-over'),
+                document.querySelector('.winner'),
+                document.querySelector('[class*="game-end"]'),
+                document.querySelector('button[class*="play-again"]'),
+                document.querySelector('button.btn.btn-secondary.mt-2.ng-star-inserted')
+            ];
+
+            for (var i = 0; i < gameEndElements.length; i++) {
+                if (gameEndElements[i] && gameEndElements[i].style.display !== 'none') {
+                    // Try to determine result from UI
+                    var text = gameEndElements[i].textContent.toLowerCase();
+                    if (text.includes('you win') || text.includes('victory')) {
+                        return 'win';
+                    } else if (text.includes('you lose') || text.includes('defeat')) {
+                        return 'loss';
+                    } else if (text.includes('draw') || text.includes('tie')) {
+                        return 'draw';
+                    } else if (text.includes('play again')) {
+                        // Game ended, but result unclear - assume loss for safety
+                        return 'loss';
+                    }
+                }
+            }
+
+            return 'ongoing';
+        },
+
+        // Reset for new game
+        reset: function() {
+            this.lastBoardState = null;
+            this.gameEndChecked = false;
+        }
+    };
+
+    // Enhanced main game loop with game end detection
     setInterval(function() {
         initAITurn();
+        GameEndDetector.checkGameEnd();
+    }, 1000);
+
+    // Initialize enhanced features on page load
+    function initializeEnhancedFeatures() {
+        BotManager.log('Enhanced Tic Tac Toe Bot initialized successfully!', 'SUCCESS');
+        BotManager.log('Features: Smart play again logic, Bot/Human detection, Loss limiting, 24h operation', 'INFO');
+
+        // Show welcome message for first-time users
+        GM.getValue('firstTimeUser', true).then(function(isFirstTime) {
+            if (isFirstTime) {
+                setTimeout(function() {
+                    var welcome = document.createElement('div');
+                    welcome.style.position = 'fixed';
+                    welcome.style.top = '50%';
+                    welcome.style.left = '50%';
+                    welcome.style.transform = 'translate(-50%, -50%)';
+                    welcome.style.backgroundColor = '#2ecc71';
+                    welcome.style.color = 'white';
+                    welcome.style.padding = '20px';
+                    welcome.style.borderRadius = '10px';
+                    welcome.style.zIndex = '10003';
+                    welcome.style.textAlign = 'center';
+                    welcome.style.fontSize = '16px';
+                    welcome.innerHTML = '🎮 Enhanced Tic Tac Toe Bot Ready!<br><br>' +
+                                       '✅ Smart opponent detection<br>' +
+                                       '✅ Intelligent play again logic<br>' +
+                                       '✅ Loss limiting (5 max)<br>' +
+                                       '✅ 24-hour safe operation<br><br>' +
+                                       'Check the Settings panel to configure and start!';
+
+                    document.body.appendChild(welcome);
+
+                    setTimeout(function() {
+                        if (welcome.parentNode) {
+                            welcome.parentNode.removeChild(welcome);
+                        }
+                    }, 8000);
+                }, 2000);
+
+                GM.setValue('firstTimeUser', false);
+            }
+        });
+    }
+
+    // Debug function to find play online buttons
+    function debugPlayOnlineButtons() {
+        var allButtons = document.querySelectorAll('button');
+        var playButtons = [];
+
+        allButtons.forEach(function(button) {
+            var text = button.textContent.toLowerCase();
+            if (text.includes('play') || text.includes('online')) {
+                playButtons.push({
+                    text: button.textContent.trim(),
+                    classes: button.className,
+                    selector: button.tagName + (button.className ? '.' + button.className.split(' ').join('.') : '')
+                });
+            }
+        });
+
+        if (playButtons.length > 0) {
+            BotManager.log('Found play buttons: ' + JSON.stringify(playButtons, null, 2));
+        } else {
+            BotManager.log('No play buttons found on page');
+        }
+    }
+
+    // Debug function to find play again buttons
+    function debugPlayAgainButtons() {
+        BotManager.log('=== PLAY AGAIN BUTTON DEBUG ===');
+
+        // Check the exact selector first
+        var exactSelector = "body > app-root > app-navigation > div > div.d-flex.flex-column.h-100.w-100 > main > app-room > div > div > div.col-md-9.col-lg-8.bg-gray-000.h-100.position-relative.overflow-hidden.ng-tns-c1645232060-14 > div > div > div > app-re-match > div > button";
+        var rematchButtons = document.querySelectorAll(exactSelector);
+
+        BotManager.log('Rematch buttons found with exact selector: ' + rematchButtons.length);
+        for (var i = 0; i < rematchButtons.length; i++) {
+            var button = rematchButtons[i];
+            BotManager.log('Rematch button ' + i + ': "' + button.textContent.trim() + '" (visible: ' + (button.offsetParent !== null) + ')');
+        }
+
+        // Check app-re-match container
+        var rematchContainer = document.querySelector('app-re-match');
+        BotManager.log('app-re-match container found: ' + !!rematchContainer);
+        if (rematchContainer) {
+            var containerButtons = rematchContainer.querySelectorAll('button');
+            BotManager.log('Buttons in app-re-match: ' + containerButtons.length);
+            for (var j = 0; j < containerButtons.length; j++) {
+                BotManager.log('Container button ' + j + ': "' + containerButtons[j].textContent.trim() + '"');
+            }
+        }
+
+        // Check all buttons with "again" text
+        var allButtons = document.querySelectorAll('button');
+        var againButtons = [];
+
+        allButtons.forEach(function(button) {
+            var text = button.textContent.toLowerCase();
+            if (text.includes('again') || text.includes('rematch') || text.includes('play again')) {
+                againButtons.push({
+                    text: button.textContent.trim(),
+                    classes: button.className,
+                    visible: button.offsetParent !== null,
+                    parentElement: button.parentElement ? button.parentElement.tagName : 'none'
+                });
+            }
+        });
+
+        BotManager.log('All "again/rematch" buttons found: ' + againButtons.length);
+        againButtons.forEach(function(btn, index) {
+            BotManager.log('Again button ' + index + ': ' + JSON.stringify(btn, null, 2));
+        });
+
+        // Check for new app-juicy-button structure
+        var juicyButtons = document.querySelectorAll('app-juicy-button');
+        BotManager.log('Found ' + juicyButtons.length + ' app-juicy-button components');
+
+        for (var i = 0; i < juicyButtons.length; i++) {
+            var juicy = juicyButtons[i];
+            BotManager.log('App-juicy-button ' + i + ':');
+            BotManager.log('  Text: "' + juicy.textContent.trim() + '"');
+            BotManager.log('  Classes: ' + juicy.className);
+            BotManager.log('  Visible: ' + (juicy.offsetParent !== null));
+            BotManager.log('  HTML: ' + juicy.outerHTML.substring(0, 200) + '...');
+
+            var innerButton = juicy.querySelector('button');
+            if (innerButton) {
+                BotManager.log('  Inner button classes: ' + innerButton.className);
+                BotManager.log('  Inner button visible: ' + (innerButton.offsetParent !== null));
+            }
+        }
+
+        // Check the specific legacy button class
+        var specificButton = document.querySelector('button.btn.btn-secondary.mt-2.ng-star-inserted');
+        if (specificButton) {
+            BotManager.log('Found legacy button with exact class: "' + specificButton.textContent.trim() + '"');
+            BotManager.log('Button HTML: ' + specificButton.outerHTML);
+            BotManager.log('Button visible: ' + (specificButton.offsetParent !== null));
+        } else {
+            BotManager.log('Legacy button with class "btn.btn-secondary.mt-2.ng-star-inserted" NOT FOUND');
+        }
+
+        // Test the actual click function
+        BotManager.log('=== TESTING CLICK FUNCTION ===');
+        var clickResult = clickPlayAgainButton();
+        BotManager.log('Click function result: ' + clickResult);
+
+        BotManager.log('=== END PLAY AGAIN DEBUG ===');
+    }
+
+    // Debug function to check game state
+    function debugGameState() {
+        BotManager.log('=== GAME STATE DEBUG ===');
+        BotManager.log('isInGame(): ' + isInGame());
+        BotManager.log('GameManager.gameInProgress: ' + (GameManager ? GameManager.gameInProgress : 'undefined'));
+        BotManager.log('BotManager.currentOpponentType: ' + BotManager.currentOpponentType);
+        BotManager.log('BotManager.isAutoPlayEnabled: ' + BotManager.isAutoPlayEnabled);
+
+        var gameBoard = document.querySelector('.grid.s-3x3');
+        var ticTacToeBoard = document.getElementById('tic-tac-toe-board');
+        BotManager.log('Game board found: ' + !!gameBoard);
+        BotManager.log('Tic-tac-toe board found: ' + !!ticTacToeBoard);
+
+        var profileOpeners = document.querySelectorAll(".text-truncate.cursor-pointer");
+        BotManager.log('Profile elements found: ' + profileOpeners.length);
+
+        profileOpeners.forEach(function(opener, index) {
+            BotManager.log('Profile ' + index + ': "' + opener.textContent.trim() + '"');
+        });
+
+        var boardState = getBoardState();
+        if (boardState) {
+            BotManager.log('Board state: ' + JSON.stringify(boardState));
+        } else {
+            BotManager.log('Board state: null');
+        }
+        BotManager.log('=== END DEBUG ===');
+    }
+
+    // Initialize on page load
+    setTimeout(initializeEnhancedFeatures, 1000);
+
+    // Debug play buttons after 5 seconds
+    setTimeout(debugPlayOnlineButtons, 5000);
+
+    // Debug game state every 10 seconds when auto-play is enabled
+    setInterval(function() {
+        if (BotManager.isAutoPlayEnabled && BotManager.currentOpponentType === 'unknown') {
+            debugGameState();
+        }
+    }, 10000);
+
+    // Make debug functions available globally for manual testing
+    window.debugTicTacToeBot = debugGameState;
+    window.debugPlayAgainButtons = debugPlayAgainButtons;
+
+    // Manual test function for play again button
+    window.testPlayAgainButton = function() {
+        console.log('=== MANUAL PLAY AGAIN BUTTON TEST ===');
+
+        // Test new app-juicy-button structure first
+        var juicyButtons = document.querySelectorAll('app-juicy-button');
+        console.log('Found ' + juicyButtons.length + ' app-juicy-button components');
+
+        for (var i = 0; i < juicyButtons.length; i++) {
+            var juicy = juicyButtons[i];
+            var text = juicy.textContent.toLowerCase().trim();
+            console.log('App-juicy-button ' + i + ' text: "' + text + '"');
+
+            if (text.includes('play') && text.includes('again')) {
+                console.log('✅ Found play again app-juicy-button');
+                var innerButton = juicy.querySelector('button');
+                if (innerButton) {
+                    console.log('Clicking inner button...');
+                    innerButton.click();
+                    console.log('Click attempted on app-juicy-button');
+                    return true;
+                } else {
+                    console.log('No inner button found, clicking component directly...');
+                    juicy.click();
+                    return true;
+                }
+            }
+        }
+
+        // Test the legacy button structure
+        var exactButton = document.querySelector('button.btn.btn-secondary.mt-2.ng-star-inserted');
+        if (exactButton) {
+            console.log('✅ Found legacy button with exact class');
+            console.log('Button text: "' + exactButton.textContent + '"');
+            console.log('Button visible: ' + (exactButton.offsetParent !== null));
+
+            // Try clicking it
+            console.log('Attempting to click legacy button...');
+            exactButton.click();
+            console.log('Click attempted');
+            return true;
+        } else {
+            console.log('❌ No app-juicy-button or legacy button found');
+
+            // Search for any button with "play" and "again"
+            var allButtons = document.querySelectorAll('button');
+            console.log('Searching through ' + allButtons.length + ' buttons...');
+
+            for (var i = 0; i < allButtons.length; i++) {
+                var btn = allButtons[i];
+                var btnText = btn.textContent.toLowerCase();
+                if (btnText.includes('play') && btnText.includes('again')) {
+                    console.log('Found alternative button: "' + btn.textContent + '"');
+                    console.log('Classes: ' + btn.className);
+                    btn.click();
+                    return true;
+                }
+            }
+            console.log('No suitable button found');
+            return false;
+        }
+    };
+
+    // Add bot name function
+    window.addBotName = function(name) {
+        if (BotManager.addKnownBot(name)) {
+            BotManager.log('Added "' + name + '" to bot list', 'SUCCESS');
+        } else {
+            BotManager.log('"' + name + '" already in bot list', 'INFO');
+        }
+    };
+
+    // Force opponent detection based on debug output
+    window.forceOpponentDetection = function() {
+        GM.getValue("username").then(function(username) {
+            var profileOpeners = document.querySelectorAll(".text-truncate.cursor-pointer");
+            BotManager.log('Force detection: Found ' + profileOpeners.length + ' profiles');
+
+            profileOpeners.forEach(function(opener) {
+                var name = opener.textContent.trim();
+                BotManager.log('Checking profile: "' + name + '"');
+
+                if (name !== username && name.length > 0) {
+                    var detectedType = BotManager.detectOpponentType(name, null);
+                    BotManager.currentOpponentType = detectedType;
+                    BotManager.currentGameCount = 0;
+                    BotManager.saveSettings();
+
+                    BotManager.log('FORCED opponent detection: ' + name + ' -> ' + detectedType, 'SUCCESS');
+
+                    if (!GameManager.gameInProgress) {
+                        GameManager.startGame();
+                        BotManager.log('Game started after forced detection');
+                    }
+                }
+            });
+        });
+    };
+
+    // Auto-trigger opponent detection if we see the right conditions
+    setTimeout(function() {
+        if (BotManager.isAutoPlayEnabled && BotManager.currentOpponentType === 'unknown') {
+            var gameBoard = document.querySelector('.grid.s-3x3');
+            var profiles = document.querySelectorAll(".text-truncate.cursor-pointer");
+
+            if (gameBoard && profiles.length >= 2) {
+                BotManager.log('Auto-triggering opponent detection...');
+                forceOpponentDetection();
+            }
+        }
+    }, 3000);
+
+    // Verify all components are loaded correctly
+    setTimeout(function() {
+        if (typeof BotManager !== 'undefined' &&
+            typeof GameManager !== 'undefined' &&
+            typeof GameEndDetector !== 'undefined' &&
+            typeof SafetyManager !== 'undefined') {
+            BotManager.log('All components loaded successfully!', 'SUCCESS');
+        } else {
+            console.error('Some components failed to load properly');
+        }
+    }, 2000);
+
+    // Auto-Play System - Monitor for play online button and game states
+    setInterval(function() {
+        if (!BotManager.isAutoPlayEnabled) {
+            BotManager.setThinking('Auto-play disabled', 'Waiting for activation');
+            return;
+        }
+
+        if (!isInGame()) {
+            // Not in a game - reset game state if needed
+            if (GameManager.gameInProgress) {
+                GameManager.gameInProgress = false;
+                GameEndDetector.reset();
+                BotManager.currentOpponentType = 'unknown'; // Reset opponent detection
+                BotManager.log('Game ended - left game area');
+            }
+
+            BotManager.setThinking('Looking for game', 'Searching for play online button');
+
+            // Check if we should automatically click play online
+            var playOnlineSelectors = [
+                "button.btn-secondary.flex-grow-1",
+                "body > app-root > app-navigation > div.d-flex.h-100 > div.d-flex.flex-column.h-100.w-100 > main > app-game-landing > div > div > div > div.col-12.col-lg-9.dashboard > div.card.area-buttons.d-flex.justify-content-center.align-items-center.flex-column > button.btn.btn-secondary.btn-lg.position-relative",
+                "button.btn.btn-secondary.btn-lg.position-relative"
+            ];
+
+            for (var i = 0; i < playOnlineSelectors.length; i++) {
+                var playButton = document.querySelector(playOnlineSelectors[i]);
+                if (playButton && playButton.textContent.toLowerCase().includes('play')) {
+                    BotManager.setThinking('Play button found', 'Will click in 2 seconds');
+                    // Wait a bit before clicking to avoid spam
+                    setTimeout(function() {
+                        if (BotManager.isAutoPlayEnabled && !isInGame()) {
+                            BotManager.setThinking('Clicking play online', 'Joining matchmaking');
+                            clickPlayOnlineButton();
+                        }
+                    }, 2000);
+                    break;
+                }
+            }
+            return;
+        }
+
+        // We're in a game - try to detect opponent and start game
+        if (BotManager.currentOpponentType === 'unknown') {
+            BotManager.setThinking('In game - detecting opponent', 'Scanning player profiles');
+            displayOpponentName(); // Force opponent detection
+        }
+
+        var boardState = getBoardState();
+        if (!boardState) return;
+
+        var isEmpty = boardState.every(function(row) {
+            return row.every(function(cell) {
+                return cell === '_';
+            });
+        });
+
+        if (isEmpty && !GameEndDetector.gameEndChecked && !GameManager.gameInProgress) {
+            // New game detected - start it even if opponent unknown for now
+            BotManager.setThinking('New game detected', 'Starting game logic');
+            GameManager.startGame();
+            BotManager.log('New game started (opponent detection in progress)');
+        }
+    }, 2000);
+
+    // Aggressive opponent detection system
+    setInterval(function() {
+        if (!BotManager.isAutoPlayEnabled) return;
+
+        // Check if we have a game board (more lenient than isInGame())
+        var gameBoard = document.querySelector('.grid.s-3x3');
+        if (!gameBoard) return;
+
+        if (BotManager.currentOpponentType === 'unknown') {
+            GM.getValue("username").then(function(username) {
+                var profileOpeners = document.querySelectorAll(".text-truncate.cursor-pointer");
+
+                BotManager.log('Searching for opponent... Found ' + profileOpeners.length + ' profile elements');
+
+                profileOpeners.forEach(function(opener) {
+                    var name = opener.textContent.trim();
+                    BotManager.log('Profile found: "' + name + '"');
+
+                    if (name !== username && name.length > 0) {
+                        BotManager.setThinking('Analyzing opponent: ' + name, 'Checking against known patterns');
+                        var detectedType = BotManager.detectOpponentType(name, null);
+                        BotManager.currentOpponentType = detectedType;
+                        BotManager.currentGameCount = 0;
+                        BotManager.saveSettings();
+
+                        BotManager.log('Opponent detected: ' + name + ' -> ' + detectedType, 'SUCCESS');
+
+                        var maxGames = detectedType === 'bot' ? BotManager.gamesPerBot : BotManager.gamesPerHuman;
+                        BotManager.setThinking('Opponent: ' + name + ' (' + detectedType + ')', 'Will play ' + maxGames + ' game(s)');
+
+                        if (!GameManager.gameInProgress) {
+                            GameManager.startGame();
+                            BotManager.log('Game started after opponent detection');
+                        }
+                    }
+                });
+            });
+        }
     }, 1000);
 
     document.addEventListener('DOMContentLoaded', function() {
