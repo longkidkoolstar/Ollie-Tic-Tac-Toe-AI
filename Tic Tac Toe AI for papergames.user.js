@@ -232,10 +232,17 @@
         gamesPerHuman: 1,
         maxLosses: 5,
 
+        // Safety and notification settings
+        enable24HourSafety: true,
+        enableBotDetectionAlert: true,
+        enableBotDetectionGUI: true,
+
+        // Profile detection tracking
+        lastProfileDetectionName: null,
+
         // Initialize the bot manager
         init: function() {
             this.loadSettings();
-            this.loadKnownBots();
             this.startHealthMonitoring();
             this.log('BotManager initialized');
         },
@@ -252,7 +259,14 @@
                 GM.getValue('detectionSensitivity', 'balanced'),
                 GM.getValue('gamesPerBot', 7),
                 GM.getValue('gamesPerHuman', 1),
-                GM.getValue('maxLosses', 5)
+                GM.getValue('maxLosses', 5),
+                GM.getValue('enable24HourSafety', true),
+                GM.getValue('enableBotDetectionAlert', true),
+                GM.getValue('enableBotDetectionGUI', true),
+                GM.getValue('knownBotNames', JSON.stringify([
+                    'Katha', 'Staci', 'Claudetta', 'Charline', 'Carolyne',
+                    'Valerye', 'Rowena', 'Arabel', 'Zea', 'Paper Man'
+                ]))
             ]).then(function(values) {
                 self.isAutoPlayEnabled = values[0];
                 self.totalLosses = values[1];
@@ -263,7 +277,26 @@
                 self.gamesPerBot = values[6];
                 self.gamesPerHuman = values[7];
                 self.maxLosses = values[8];
+                self.enable24HourSafety = values[9];
+                self.enableBotDetectionAlert = values[10];
+                self.enableBotDetectionGUI = values[11];
+
+                // Load known bot names from storage
+                try {
+                    self.knownBotNames = JSON.parse(values[12]);
+                    self.log('Loaded ' + self.knownBotNames.length + ' known bot names from storage');
+                } catch (e) {
+                    self.log('Error loading known bot names, using defaults: ' + e.message, 'WARN');
+                    self.knownBotNames = [
+                        'Katha', 'Staci', 'Claudetta', 'Charline', 'Carolyne',
+                        'Valerye', 'Rowena', 'Arabel', 'Zea', 'Paper Man'
+                    ];
+                }
+
                 self.log('Settings loaded');
+
+                // Update settings UI after loading
+                self.updateSettingsUI();
             });
         },
 
@@ -278,13 +311,14 @@
             GM.setValue('gamesPerBot', this.gamesPerBot);
             GM.setValue('gamesPerHuman', this.gamesPerHuman);
             GM.setValue('maxLosses', this.maxLosses);
+            GM.setValue('enable24HourSafety', this.enable24HourSafety);
+            GM.setValue('enableBotDetectionAlert', this.enableBotDetectionAlert);
+            GM.setValue('enableBotDetectionGUI', this.enableBotDetectionGUI);
+            GM.setValue('knownBotNames', JSON.stringify(this.knownBotNames));
         },
 
-        // Known bot names from bots.txt
-        knownBotNames: [
-            'Katha', 'Staci', 'Claudetta', 'Charline', 'Carolyne',
-            'Valerye', 'Rowena', 'Arabel', 'Zea', 'Paper Man'
-        ],
+        // Known bot names - loaded from GM storage in loadSettings()
+        knownBotNames: [],
 
         // Detect if opponent is bot or human
         detectOpponentType: function(opponentName, responseTime) {
@@ -629,42 +663,43 @@
         // Reset opponent name when starting new matchmaking
         resetOpponentName: function() {
             this.currentOpponentName = 'Unknown';
+            this.lastProfileDetectionName = null; // Reset profile detection tracking
             this.log('Opponent name reset for new matchmaking');
         },
 
         // Add a new bot name to the known list
         addKnownBot: function(botName) {
-            if (!this.knownBotNames.includes(botName)) {
-                this.knownBotNames.push(botName);
-                this.log('Added new bot to known list: ' + botName, 'INFO');
+            if (!botName || botName.trim().length === 0) {
+                this.log('Cannot add empty bot name', 'WARN');
+                return false;
+            }
+
+            var cleanName = botName.trim();
+            if (!this.knownBotNames.includes(cleanName)) {
+                this.knownBotNames.push(cleanName);
+                this.log('Added new bot to known list: "' + cleanName + '" (Total: ' + this.knownBotNames.length + ')', 'SUCCESS');
 
                 // Save to GM storage for persistence
-                GM.setValue('knownBotNames', JSON.stringify(this.knownBotNames));
+                var self = this;
+                GM.setValue('knownBotNames', JSON.stringify(this.knownBotNames)).then(function() {
+                    self.log('Bot names saved to GM storage successfully', 'SUCCESS');
+                }).catch(function(error) {
+                    self.log('Error saving bot names to GM storage: ' + error, 'ERROR');
+                });
+
+                // Update the display if the function exists
+                if (this.updateKnownBotsDisplay) {
+                    this.updateKnownBotsDisplay();
+                }
+
                 return true;
+            } else {
+                this.log('Bot already in known list: "' + cleanName + '"', 'INFO');
             }
             return false;
         },
 
-        // Load known bot names from storage
-        loadKnownBots: function() {
-            var self = this;
-            GM.getValue('knownBotNames', '[]').then(function(storedBots) {
-                try {
-                    var savedBots = JSON.parse(storedBots);
-                    if (savedBots.length > 0) {
-                        // Merge with default list, avoiding duplicates
-                        savedBots.forEach(function(botName) {
-                            if (!self.knownBotNames.includes(botName)) {
-                                self.knownBotNames.push(botName);
-                            }
-                        });
-                        self.log('Loaded ' + savedBots.length + ' additional bot names from storage');
-                    }
-                } catch (e) {
-                    self.log('Error loading saved bot names: ' + e.message, 'WARN');
-                }
-            });
-        },
+        // Note: Known bot names are now loaded in loadSettings() function
 
         // Health monitoring and 24-hour operation
         startHealthMonitoring: function() {
@@ -693,8 +728,8 @@
                     ', Losses: ' + this.totalLosses +
                     ', Detection accuracy: ' + this.getDetectionAccuracy() + '%');
 
-            // Auto-disable after 24 hours for safety
-            if (hours >= 24 && this.isAutoPlayEnabled) {
+            // Auto-disable after 24 hours for safety (if enabled)
+            if (this.enable24HourSafety && hours >= 24 && this.isAutoPlayEnabled) {
                 this.log('24-hour limit reached. Auto-disabling for safety.');
                 this.isAutoPlayEnabled = false;
                 this.saveSettings();
@@ -785,6 +820,15 @@
         performProfileNameDetection: function(displayName, callback) {
             var self = this;
 
+            // Prevent duplicate detection for the same opponent
+            if (this.lastProfileDetectionName === displayName) {
+                self.log('Profile detection already performed for: ' + displayName + ', skipping duplicate');
+                callback(false, null);
+                return;
+            }
+
+            this.lastProfileDetectionName = displayName;
+
             try {
                 // Step 1: Find the opponent's clickable name in the game room
                 var opponentNameElement = this.findOpponentNameElement(displayName);
@@ -815,8 +859,42 @@
                             self.log('BOT DETECTED: Display name "' + displayName + '" != Profile name "' + profileName + '"', 'SUCCESS');
                             // Show bot detection notification
                             self.showBotDetectionNotification(displayName, profileName);
+
+                            // Add both display name and profile name to known bots
+                            self.addKnownBot(displayName);
+                            if (profileName && profileName !== displayName) {
+                                self.addKnownBot(profileName);
+                            }
+
+                            // Record in detection history
+                            self.detectionHistory.push({
+                                opponent: displayName,
+                                type: 'bot',
+                                confidence: 1.0,
+                                factors: ['Profile name mismatch: display="' + displayName + '", profile="' + profileName + '"'],
+                                timestamp: Date.now()
+                            });
+
+                            // Keep only last 20 detections
+                            if (self.detectionHistory.length > 20) {
+                                self.detectionHistory.shift();
+                            }
                         } else {
                             self.log('Names match - likely human player: "' + displayName + '" == "' + profileName + '"');
+
+                            // Record in detection history
+                            self.detectionHistory.push({
+                                opponent: displayName,
+                                type: 'human',
+                                confidence: 1.0,
+                                factors: ['Profile name matches display name'],
+                                timestamp: Date.now()
+                            });
+
+                            // Keep only last 20 detections
+                            if (self.detectionHistory.length > 20) {
+                                self.detectionHistory.shift();
+                            }
                         }
 
                         // Step 5: Close the profile sidebar
@@ -1037,43 +1115,96 @@
 
         // Show bot detection notification
         showBotDetectionNotification: function(displayName, profileName) {
-            // Console notification
+            // Console notification (always shown)
             console.log('%c🤖 BOT DETECTED! 🤖', 'color: red; font-size: 16px; font-weight: bold;');
             console.log('%cDisplay Name: ' + displayName, 'color: orange; font-weight: bold;');
             console.log('%cProfile Name: ' + profileName, 'color: orange; font-weight: bold;');
 
-            // Browser alert
-            alert('🤖 BOT DETECTED!\n\nDisplay Name: ' + displayName + '\nProfile Name: ' + profileName + '\n\nThe opponent appears to be a bot because their display name doesn\'t match their profile name.');
+            // Browser alert (if enabled)
+            if (this.enableBotDetectionAlert) {
+                alert('🤖 BOT DETECTED!\n\nDisplay Name: ' + displayName + '\nProfile Name: ' + profileName + '\n\nThe opponent appears to be a bot because their display name doesn\'t match their profile name.');
+            }
 
-            // On-screen overlay notification
-            var notification = document.createElement('div');
-            notification.style.position = 'fixed';
-            notification.style.top = '20px';
-            notification.style.right = '20px';
-            notification.style.backgroundColor = '#e74c3c';
-            notification.style.color = 'white';
-            notification.style.padding = '15px 20px';
-            notification.style.borderRadius = '8px';
-            notification.style.zIndex = '10003';
-            notification.style.fontSize = '14px';
-            notification.style.fontWeight = 'bold';
-            notification.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
-            notification.style.maxWidth = '300px';
-            notification.innerHTML =
-                '🤖 <strong>BOT DETECTED!</strong><br>' +
-                '<small>Display: ' + displayName + '</small><br>' +
-                '<small>Profile: ' + profileName + '</small>';
+            // On-screen overlay notification (if enabled)
+            if (this.enableBotDetectionGUI) {
+                var notification = document.createElement('div');
+                notification.style.position = 'fixed';
+                notification.style.top = '20px';
+                notification.style.right = '20px';
+                notification.style.backgroundColor = '#e74c3c';
+                notification.style.color = 'white';
+                notification.style.padding = '15px 20px';
+                notification.style.borderRadius = '8px';
+                notification.style.zIndex = '10003';
+                notification.style.fontSize = '14px';
+                notification.style.fontWeight = 'bold';
+                notification.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+                notification.style.maxWidth = '300px';
+                notification.innerHTML =
+                    '🤖 <strong>BOT DETECTED!</strong><br>' +
+                    '<small>Display: ' + displayName + '</small><br>' +
+                    '<small>Profile: ' + profileName + '</small>';
 
-            document.body.appendChild(notification);
+                document.body.appendChild(notification);
 
-            // Auto-remove notification after 8 seconds
-            setTimeout(function() {
-                if (notification.parentNode) {
-                    notification.parentNode.removeChild(notification);
+                // Auto-remove notification after 8 seconds
+                setTimeout(function() {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 8000);
+            }
+
+            this.log('Bot detection notification displayed (Alert: ' + this.enableBotDetectionAlert + ', GUI: ' + this.enableBotDetectionGUI + ')', 'SUCCESS');
+        },
+
+        // Update settings UI elements to reflect current values
+        updateSettingsUI: function() {
+            // Update alert toggle if it exists
+            var alertToggle = document.querySelector('#bot-alert-toggle');
+            if (alertToggle) {
+                alertToggle.textContent = this.enableBotDetectionAlert ? 'Alert ON' : 'Alert OFF';
+                alertToggle.style.backgroundColor = this.enableBotDetectionAlert ? '#2ecc71' : '#e74c3c';
+            }
+
+            // Update GUI toggle if it exists
+            var guiToggle = document.querySelector('#bot-gui-toggle');
+            if (guiToggle) {
+                guiToggle.textContent = this.enableBotDetectionGUI ? 'GUI ON' : 'GUI OFF';
+                guiToggle.style.backgroundColor = this.enableBotDetectionGUI ? '#2ecc71' : '#e74c3c';
+            }
+
+            // Update safety toggle if it exists
+            var safetyToggle = document.querySelector('#safety-toggle');
+            if (safetyToggle) {
+                safetyToggle.textContent = this.enable24HourSafety ? 'Safety ON' : 'Safety OFF';
+                safetyToggle.style.backgroundColor = this.enable24HourSafety ? '#2ecc71' : '#f39c12';
+            }
+
+            // Update known bots display if function exists
+            if (this.updateKnownBotsDisplay) {
+                this.updateKnownBotsDisplay();
+            }
+
+            this.log('Settings UI updated to reflect stored values');
+        },
+
+        // Debug function to check GM storage
+        debugStorage: function() {
+            var self = this;
+            GM.getValue('knownBotNames', '[]').then(function(storedBots) {
+                self.log('=== GM STORAGE DEBUG ===');
+                self.log('Stored bot names: ' + storedBots);
+                try {
+                    var parsed = JSON.parse(storedBots);
+                    self.log('Parsed bot names: ' + JSON.stringify(parsed));
+                    self.log('Number of stored bots: ' + parsed.length);
+                } catch (e) {
+                    self.log('Error parsing stored bot names: ' + e.message, 'ERROR');
                 }
-            }, 8000);
-
-            this.log('Bot detection notification displayed', 'SUCCESS');
+                self.log('Current knownBotNames array: ' + JSON.stringify(self.knownBotNames));
+                self.log('=== END STORAGE DEBUG ===');
+            });
         }
     };
 
@@ -2139,7 +2270,7 @@
 
         // Known Bots Display
         var knownBotsLabel = document.createElement('div');
-        knownBotsLabel.textContent = 'Known Bot Names:';
+        knownBotsLabel.textContent = 'Known Bot Names (' + BotManager.knownBotNames.length + '):';
         knownBotsLabel.style.marginBottom = '5px';
         knownBotsLabel.style.marginTop = '15px';
         knownBotsLabel.style.color = 'white';
@@ -2154,11 +2285,102 @@
         knownBotsDisplay.style.overflowY = 'auto';
         knownBotsDisplay.innerHTML = BotManager.knownBotNames.join(', ');
 
+        // Function to update known bots display
+        BotManager.updateKnownBotsDisplay = function() {
+            if (knownBotsLabel && knownBotsDisplay) {
+                knownBotsLabel.textContent = 'Known Bot Names (' + BotManager.knownBotNames.length + '):';
+                knownBotsDisplay.innerHTML = BotManager.knownBotNames.join(', ');
+            }
+        };
+
+        // Bot Detection Alert Toggle
+        var alertToggleLabel = document.createElement('div');
+        alertToggleLabel.textContent = 'Bot Detection Alert:';
+        alertToggleLabel.style.marginBottom = '5px';
+        alertToggleLabel.style.marginTop = '15px';
+        alertToggleLabel.style.fontWeight = 'bold';
+
+        var alertToggle = document.createElement('button');
+        alertToggle.id = 'bot-alert-toggle';
+        alertToggle.textContent = BotManager.enableBotDetectionAlert ? 'Alert ON' : 'Alert OFF';
+        alertToggle.style.backgroundColor = BotManager.enableBotDetectionAlert ? '#2ecc71' : '#e74c3c';
+        alertToggle.style.color = 'white';
+        alertToggle.style.border = 'none';
+        alertToggle.style.padding = '8px 16px';
+        alertToggle.style.borderRadius = '4px';
+        alertToggle.style.cursor = 'pointer';
+        alertToggle.style.marginBottom = '10px';
+
+        alertToggle.addEventListener('click', function() {
+            BotManager.enableBotDetectionAlert = !BotManager.enableBotDetectionAlert;
+            alertToggle.textContent = BotManager.enableBotDetectionAlert ? 'Alert ON' : 'Alert OFF';
+            alertToggle.style.backgroundColor = BotManager.enableBotDetectionAlert ? '#2ecc71' : '#e74c3c';
+            BotManager.saveSettings();
+            BotManager.log('Bot detection alert ' + (BotManager.enableBotDetectionAlert ? 'enabled' : 'disabled'));
+        });
+
+        // Bot Detection GUI Toggle
+        var guiToggleLabel = document.createElement('div');
+        guiToggleLabel.textContent = 'Bot Detection GUI Popup:';
+        guiToggleLabel.style.marginBottom = '5px';
+        guiToggleLabel.style.fontWeight = 'bold';
+
+        var guiToggle = document.createElement('button');
+        guiToggle.id = 'bot-gui-toggle';
+        guiToggle.textContent = BotManager.enableBotDetectionGUI ? 'GUI ON' : 'GUI OFF';
+        guiToggle.style.backgroundColor = BotManager.enableBotDetectionGUI ? '#2ecc71' : '#e74c3c';
+        guiToggle.style.color = 'white';
+        guiToggle.style.border = 'none';
+        guiToggle.style.padding = '8px 16px';
+        guiToggle.style.borderRadius = '4px';
+        guiToggle.style.cursor = 'pointer';
+        guiToggle.style.marginBottom = '10px';
+
+        guiToggle.addEventListener('click', function() {
+            BotManager.enableBotDetectionGUI = !BotManager.enableBotDetectionGUI;
+            guiToggle.textContent = BotManager.enableBotDetectionGUI ? 'GUI ON' : 'GUI OFF';
+            guiToggle.style.backgroundColor = BotManager.enableBotDetectionGUI ? '#2ecc71' : '#e74c3c';
+            BotManager.saveSettings();
+            BotManager.log('Bot detection GUI ' + (BotManager.enableBotDetectionGUI ? 'enabled' : 'disabled'));
+        });
+
+        // 24-Hour Safety Toggle
+        var safetyToggleLabel = document.createElement('div');
+        safetyToggleLabel.textContent = '24-Hour Safety Limit:';
+        safetyToggleLabel.style.marginBottom = '5px';
+        safetyToggleLabel.style.marginTop = '15px';
+        safetyToggleLabel.style.fontWeight = 'bold';
+
+        var safetyToggle = document.createElement('button');
+        safetyToggle.id = 'safety-toggle';
+        safetyToggle.textContent = BotManager.enable24HourSafety ? 'Safety ON' : 'Safety OFF';
+        safetyToggle.style.backgroundColor = BotManager.enable24HourSafety ? '#2ecc71' : '#f39c12';
+        safetyToggle.style.color = 'white';
+        safetyToggle.style.border = 'none';
+        safetyToggle.style.padding = '8px 16px';
+        safetyToggle.style.borderRadius = '4px';
+        safetyToggle.style.cursor = 'pointer';
+        safetyToggle.style.marginBottom = '10px';
+
+        safetyToggle.addEventListener('click', function() {
+            BotManager.enable24HourSafety = !BotManager.enable24HourSafety;
+            safetyToggle.textContent = BotManager.enable24HourSafety ? 'Safety ON' : 'Safety OFF';
+            safetyToggle.style.backgroundColor = BotManager.enable24HourSafety ? '#2ecc71' : '#f39c12';
+            BotManager.saveSettings();
+            BotManager.log('24-hour safety ' + (BotManager.enable24HourSafety ? 'enabled' : 'disabled'));
+        });
+
         detectionSettings.appendChild(sensitivityLabel);
         detectionSettings.appendChild(sensitivitySlider);
         detectionSettings.appendChild(sensitivityDisplay);
         detectionSettings.appendChild(overrideLabel);
         detectionSettings.appendChild(overrideContainer);
+        detectionSettings.appendChild(alertToggleLabel);
+        detectionSettings.appendChild(alertToggle);
+        detectionSettings.appendChild(guiToggleLabel);
+        detectionSettings.appendChild(guiToggle);
+        detectionSettings.appendChild(safetyToggleLabel);
+        detectionSettings.appendChild(safetyToggle);
         detectionSettings.appendChild(historyLabel);
         detectionSettings.appendChild(historyDisplay);
         detectionSettings.appendChild(knownBotsLabel);
@@ -3237,6 +3459,11 @@
     // Initialize on page load
     setTimeout(initializeEnhancedFeatures, 1000);
 
+    // Update settings UI after GM storage loads
+    setTimeout(function() {
+        BotManager.updateSettingsUI();
+    }, 3000);
+
     // Debug play buttons after 5 seconds
     setTimeout(debugPlayOnlineButtons, 5000);
 
@@ -3442,58 +3669,13 @@
 
     // Aggressive opponent detection system - DISABLED to avoid conflicts with enhanced detection
     // The profile-based detection is now handled in the main game monitoring loop above
+    // This entire section has been disabled to prevent duplicate detection
+
     /*
+    // DISABLED CODE BLOCK - DO NOT UNCOMMENT
     setInterval(function() {
-        if (!BotManager.isAutoPlayEnabled) return;
-
-        // Check if we have a game board (more lenient than isInGame())
-        var gameBoard = document.querySelector('.grid.s-3x3');
-        if (!gameBoard) return;
-
-        if (BotManager.currentOpponentType === 'unknown') {
-            GM.getValue("username").then(function(username) {
-                var profileOpeners = document.querySelectorAll(".text-truncate.cursor-pointer");
-
-                BotManager.log('Searching for opponent... Found ' + profileOpeners.length + ' profile elements');
-
-                profileOpeners.forEach(function(opener) {
-                    var name = opener.textContent.trim();
-                    BotManager.log('Profile found: "' + name + '"');
-
-                    if (name !== username && name.length > 0) {
-                        BotManager.setThinking('Analyzing opponent: ' + name, 'Performing profile-based bot detection');
-
-                        // First try profile-based detection
-                        BotManager.performProfileNameDetection(name, function(isBot, profileName) {
-                            var detectedType;
-
-                            if (isBot) {
-                                detectedType = 'bot';
-                                BotManager.log('Opponent classified as bot via profile detection: ' + name, 'SUCCESS');
-                            } else {
-                                // Fall back to existing detection methods
-                                detectedType = BotManager.detectOpponentType(name, null);
-                                BotManager.log('Profile detection inconclusive, using traditional detection: ' + name + ' -> ' + detectedType);
-                            }
-
-                            BotManager.currentOpponentType = detectedType;
-                            BotManager.currentGameCount = 0;
-                            BotManager.saveSettings();
-
-                            BotManager.log('Final opponent classification: ' + name + ' -> ' + detectedType, 'SUCCESS');
-
-                            var maxGames = detectedType === 'bot' ? BotManager.gamesPerBot : BotManager.gamesPerHuman;
-                            BotManager.setThinking('Opponent: ' + name + ' (' + detectedType + ')', 'Will play ' + maxGames + ' game(s)');
-
-                            if (!GameManager.gameInProgress) {
-                                GameManager.startGame();
-                                BotManager.log('Game started after opponent detection');
-                            }
-                        });
-                    }
-                });
-            });
-        }
+        // This detection system has been replaced by the enhanced profile-based detection above
+        // Keeping this commented out to prevent conflicts and duplicate detection
     }, 1000);
     */
 
