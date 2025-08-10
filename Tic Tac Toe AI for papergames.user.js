@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Tic Tac Toe AI for papergames
 // @namespace    https://github.com/longkidkoolstar
-// @version      3.0
-// @description  AI plays Tic-Tac-Toe for you on papergames.io. Have fun and destroy some nerds 😃!!
+// @version      3.1
+// @description  AI plays Tic-Tac-Toe for you on papergames.io with advanced bot detection. Have fun and destroy some nerds 😃!!
 // @author       longkidkoolstar
 // @icon         https://th.bing.com/th/id/R.3502d1ca849b062acb85cf68a8c48bcd?rik=LxTvt1UpLC2y2g&pid=ImgRaw&r=0
 // @match        https://papergames.io/*
@@ -14,6 +14,24 @@
 
 (function() {
     'use strict';
+
+    /*
+     * ENHANCED BOT DETECTION SYSTEM
+     * =============================
+     * This userscript now includes advanced bot detection that works by comparing
+     * the opponent's displayed name in the match to their actual profile name.
+     *
+     * Detection Process:
+     * 1. Locates opponent's name in <app-room-players> container
+     * 2. Clicks on the opponent's name (with appprofileopener attribute) to open profile sidebar
+     * 3. Retrieves the actual profile name from the sidebar header
+     * 4. Compares display name vs profile name - if different, classifies as bot
+     * 5. Shows "Bot detected" notification in console, alert, and on-screen overlay
+     * 6. Automatically closes profile sidebar to avoid disrupting gameplay
+     *
+     * This detection runs automatically when matches start and integrates with
+     * the existing bot management system for optimal gameplay strategy.
+     */
 
     var depth;
 
@@ -282,6 +300,9 @@
                     break;
                 }
             }
+
+            // Note: Profile name detection is now handled separately in the main detection loop
+            // to avoid async issues in this synchronous function
 
             // If not a known bot, continue with other detection methods
             if (confidence < 1.0) {
@@ -758,6 +779,301 @@
             var hours = Math.floor(runtime / 3600000);
             var minutes = Math.floor((runtime % 3600000) / 60000);
             return hours + 'h ' + minutes + 'm';
+        },
+
+        // Profile name detection for bot identification
+        performProfileNameDetection: function(displayName, callback) {
+            var self = this;
+
+            try {
+                // Step 1: Find the opponent's clickable name in the game room
+                var opponentNameElement = this.findOpponentNameElement(displayName);
+
+                if (!opponentNameElement) {
+                    self.log('Could not find opponent name element for profile detection', 'WARN');
+                    callback(false, null);
+                    return;
+                }
+
+                self.log('Found opponent name element, attempting profile detection for: ' + displayName);
+
+                // Step 2: Click on the opponent's name to open profile sidebar
+                opponentNameElement.click();
+                self.log('Clicked opponent name to open profile sidebar');
+
+                // Step 3: Wait for profile sidebar to load and get the profile name
+                setTimeout(function() {
+                    var profileName = self.getProfileNameFromSidebar();
+
+                    if (profileName) {
+                        self.log('Retrieved profile name: "' + profileName + '"');
+
+                        // Step 4: Compare display name with profile name
+                        var isBot = displayName.toLowerCase() !== profileName.toLowerCase();
+
+                        if (isBot) {
+                            self.log('BOT DETECTED: Display name "' + displayName + '" != Profile name "' + profileName + '"', 'SUCCESS');
+                            // Show bot detection notification
+                            self.showBotDetectionNotification(displayName, profileName);
+                        } else {
+                            self.log('Names match - likely human player: "' + displayName + '" == "' + profileName + '"');
+                        }
+
+                        // Step 5: Close the profile sidebar
+                        self.closeProfileSidebar();
+
+                        callback(isBot, profileName);
+                    } else {
+                        self.log('Could not retrieve profile name from sidebar', 'WARN');
+                        self.closeProfileSidebar();
+                        callback(false, null);
+                    }
+                }, 1500); // Wait 1.5 seconds for sidebar to load
+
+            } catch (error) {
+                self.log('Error in profile name detection: ' + error.message, 'ERROR');
+                self.closeProfileSidebar(); // Ensure sidebar is closed on error
+                callback(false, null);
+            }
+        },
+
+        // Find the opponent's clickable name element in the game room
+        findOpponentNameElement: function(displayName) {
+            try {
+                this.log('=== SEARCHING FOR OPPONENT NAME ELEMENT ===');
+
+                // Look for the app-room-players container
+                var roomPlayersContainer = document.querySelector('app-room-players');
+
+                if (!roomPlayersContainer) {
+                    this.log('app-room-players container not found', 'WARN');
+
+                    // Debug: Check what containers are available
+                    var allContainers = document.querySelectorAll('[class*="room"], [class*="player"]');
+                    this.log('Available containers with room/player in class: ' + allContainers.length);
+                    for (var i = 0; i < Math.min(allContainers.length, 5); i++) {
+                        this.log('Container ' + i + ': ' + allContainers[i].className);
+                    }
+                    return null;
+                }
+
+                this.log('Found app-room-players container');
+
+                // Find all player containers within app-room-players
+                var playerContainers = roomPlayersContainer.querySelectorAll('div.col-6.d-flex.align-items-center.gap-1.gap-md-2.flex-row-reverse.ng-star-inserted');
+
+                this.log('Found ' + playerContainers.length + ' player containers with exact selector');
+
+                // If exact selector doesn't work, try broader selectors
+                if (playerContainers.length === 0) {
+                    playerContainers = roomPlayersContainer.querySelectorAll('div.col-6');
+                    this.log('Fallback: Found ' + playerContainers.length + ' containers with .col-6');
+                }
+
+                if (playerContainers.length === 0) {
+                    playerContainers = roomPlayersContainer.querySelectorAll('div[class*="col-6"]');
+                    this.log('Fallback: Found ' + playerContainers.length + ' containers with col-6 in class');
+                }
+
+                // Debug: Log all containers found
+                for (var j = 0; j < playerContainers.length; j++) {
+                    var container = playerContainers[j];
+                    this.log('Player container ' + j + ': ' + container.className);
+                    this.log('Container ' + j + ' content: "' + container.textContent.trim().substring(0, 50) + '"');
+                }
+
+                // Try to find opponent in available containers
+                if (playerContainers.length >= 1) {
+                    // Check each container to find the one with the opponent
+                    for (var containerIndex = 0; containerIndex < playerContainers.length; containerIndex++) {
+                        var container = playerContainers[containerIndex];
+                        this.log('Checking container ' + containerIndex + ': ' + container.className);
+
+                        // Look for the clickable name element with appprofileopener attribute
+                        var nameElement = container.querySelector('[appprofileopener].text-truncate.cursor-pointer');
+
+                        if (nameElement) {
+                            var nameText = nameElement.textContent.trim();
+                            this.log('Found name element in container ' + containerIndex + ': "' + nameText + '"');
+                            this.log('Name element classes: ' + nameElement.className);
+
+                            // Check if this is likely the opponent (not our own name)
+                            // We'll return the first clickable name we find for now
+                            return nameElement;
+                        } else {
+                            this.log('No appprofileopener element in container ' + containerIndex);
+
+                            // Debug: Try alternative selectors in this container
+                            var altSelectors = [
+                                '[appprofileopener]',
+                                '.text-truncate.cursor-pointer',
+                                '.cursor-pointer',
+                                '[class*="cursor-pointer"]',
+                                '.text-truncate'
+                            ];
+
+                            for (var k = 0; k < altSelectors.length; k++) {
+                                var altElement = container.querySelector(altSelectors[k]);
+                                if (altElement) {
+                                    var altText = altElement.textContent.trim();
+                                    this.log('Alternative element found in container ' + containerIndex + ' with selector "' + altSelectors[k] + '": "' + altText + '"');
+
+                                    // Check if this element contains the opponent name we're looking for
+                                    // We can use the displayName parameter to verify
+                                    if (displayName && altText.includes(displayName)) {
+                                        this.log('Using alternative element as it contains opponent name: ' + displayName);
+                                        return altElement;
+                                    } else if (!displayName && altText.length > 3) {
+                                        this.log('Using alternative element as it seems to contain a name');
+                                        return altElement;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    this.log('No suitable name element found in any container', 'WARN');
+                } else {
+                    this.log('No player containers found', 'WARN');
+                }
+
+                // Final fallback: Search the entire page for clickable elements containing the opponent name
+                if (displayName) {
+                    this.log('Final fallback: Searching entire page for clickable elements containing: ' + displayName);
+
+                    var allClickableElements = document.querySelectorAll('[appprofileopener], .cursor-pointer, [class*="cursor-pointer"], [onclick], button');
+                    this.log('Found ' + allClickableElements.length + ' clickable elements on page');
+
+                    for (var m = 0; m < allClickableElements.length; m++) {
+                        var element = allClickableElements[m];
+                        var elementText = element.textContent.trim();
+
+                        if (elementText.includes(displayName)) {
+                            this.log('Found clickable element containing opponent name: "' + elementText + '"');
+                            this.log('Element tag: ' + element.tagName + ', classes: ' + element.className);
+                            return element;
+                        }
+                    }
+                }
+
+                this.log('=== END OPPONENT NAME ELEMENT SEARCH ===');
+                return null;
+            } catch (error) {
+                this.log('Error finding opponent name element: ' + error.message, 'ERROR');
+                return null;
+            }
+        },
+
+        // Get the profile name from the opened sidebar
+        getProfileNameFromSidebar: function() {
+            try {
+                var profileNameElement = document.querySelector('body > app-root > app-navigation > app-profile-sidenav > div > header > h1');
+
+                if (profileNameElement) {
+                    var profileName = profileNameElement.textContent.trim();
+                    this.log('Profile name found in sidebar: "' + profileName + '"');
+                    return profileName;
+                } else {
+                    this.log('Profile name element not found in sidebar', 'WARN');
+                    return null;
+                }
+            } catch (error) {
+                this.log('Error getting profile name from sidebar: ' + error.message, 'ERROR');
+                return null;
+            }
+        },
+
+        // Close the profile sidebar
+        closeProfileSidebar: function() {
+            try {
+                // Look for common close button selectors in sidebars
+                var closeSelectors = [
+                    'app-profile-sidenav .btn-close',
+                    'app-profile-sidenav button[aria-label="Close"]',
+                    'app-profile-sidenav .close',
+                    'app-profile-sidenav [class*="close"]',
+                    'app-profile-sidenav button'
+                ];
+
+                for (var i = 0; i < closeSelectors.length; i++) {
+                    var closeButton = document.querySelector(closeSelectors[i]);
+                    if (closeButton) {
+                        closeButton.click();
+                        this.log('Closed profile sidebar using selector: ' + closeSelectors[i]);
+                        return true;
+                    }
+                }
+
+                // Alternative: Click outside the sidebar to close it
+                var sidebar = document.querySelector('app-profile-sidenav');
+                if (sidebar) {
+                    // Click on the backdrop/overlay to close
+                    var backdrop = document.querySelector('.modal-backdrop, .sidebar-backdrop, [class*="backdrop"]');
+                    if (backdrop) {
+                        backdrop.click();
+                        this.log('Closed profile sidebar by clicking backdrop');
+                        return true;
+                    }
+
+                    // Try pressing Escape key
+                    var escapeEvent = new KeyboardEvent('keydown', {
+                        key: 'Escape',
+                        code: 'Escape',
+                        keyCode: 27,
+                        bubbles: true
+                    });
+                    document.dispatchEvent(escapeEvent);
+                    this.log('Attempted to close profile sidebar with Escape key');
+                    return true;
+                }
+
+                this.log('Could not find a way to close profile sidebar', 'WARN');
+                return false;
+            } catch (error) {
+                this.log('Error closing profile sidebar: ' + error.message, 'ERROR');
+                return false;
+            }
+        },
+
+        // Show bot detection notification
+        showBotDetectionNotification: function(displayName, profileName) {
+            // Console notification
+            console.log('%c🤖 BOT DETECTED! 🤖', 'color: red; font-size: 16px; font-weight: bold;');
+            console.log('%cDisplay Name: ' + displayName, 'color: orange; font-weight: bold;');
+            console.log('%cProfile Name: ' + profileName, 'color: orange; font-weight: bold;');
+
+            // Browser alert
+            alert('🤖 BOT DETECTED!\n\nDisplay Name: ' + displayName + '\nProfile Name: ' + profileName + '\n\nThe opponent appears to be a bot because their display name doesn\'t match their profile name.');
+
+            // On-screen overlay notification
+            var notification = document.createElement('div');
+            notification.style.position = 'fixed';
+            notification.style.top = '20px';
+            notification.style.right = '20px';
+            notification.style.backgroundColor = '#e74c3c';
+            notification.style.color = 'white';
+            notification.style.padding = '15px 20px';
+            notification.style.borderRadius = '8px';
+            notification.style.zIndex = '10003';
+            notification.style.fontSize = '14px';
+            notification.style.fontWeight = 'bold';
+            notification.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+            notification.style.maxWidth = '300px';
+            notification.innerHTML =
+                '🤖 <strong>BOT DETECTED!</strong><br>' +
+                '<small>Display: ' + displayName + '</small><br>' +
+                '<small>Profile: ' + profileName + '</small>';
+
+            document.body.appendChild(notification);
+
+            // Auto-remove notification after 8 seconds
+            setTimeout(function() {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 8000);
+
+            this.log('Bot detection notification displayed', 'SUCCESS');
         }
     };
 
@@ -875,6 +1191,8 @@
             BotManager.recordMoveTime(); // Reset move timing
             BotManager.log('Game started');
             BotManager.setThinking('Game in progress', 'Analyzing board and planning moves');
+
+            // Note: Bot detection is handled in the main opponent detection loop
         },
 
         // End current game
@@ -2525,20 +2843,38 @@
             if (opponentName) {
                 console.log("Opponent: " + opponentName);
 
-                // Enhanced opponent detection for auto-play
+                // Enhanced opponent detection for auto-play with profile-based detection
                 if (BotManager.isAutoPlayEnabled && BotManager.currentOpponentType === 'unknown') {
-                    // Use the opponent name for immediate detection
-                    var detectedType = BotManager.detectOpponentType(opponentName, null);
-                    BotManager.currentOpponentType = detectedType;
-                    BotManager.currentGameCount = 0; // Reset game count for new opponent
-                    BotManager.saveSettings();
+                    BotManager.log('Starting profile-based bot detection for: ' + opponentName);
+                    BotManager.setThinking('Analyzing opponent: ' + opponentName, 'Performing profile-based bot detection');
 
-                    BotManager.log('Opponent detected: ' + opponentName + ' -> ' + detectedType, 'SUCCESS');
+                    // Use profile-based detection first
+                    BotManager.performProfileNameDetection(opponentName, function(isBot, profileName) {
+                        var detectedType;
 
-                    // Start game tracking
-                    if (!GameManager.gameInProgress) {
-                        GameManager.startGame();
-                    }
+                        if (isBot) {
+                            detectedType = 'bot';
+                            BotManager.log('Opponent classified as bot via profile detection: ' + opponentName, 'SUCCESS');
+                        } else {
+                            // Fall back to existing detection methods
+                            detectedType = BotManager.detectOpponentType(opponentName, null);
+                            BotManager.log('Profile detection inconclusive, using traditional detection: ' + opponentName + ' -> ' + detectedType);
+                        }
+
+                        BotManager.currentOpponentType = detectedType;
+                        BotManager.currentGameCount = 0; // Reset game count for new opponent
+                        BotManager.saveSettings();
+
+                        BotManager.log('Final opponent classification: ' + opponentName + ' -> ' + detectedType, 'SUCCESS');
+
+                        var maxGames = detectedType === 'bot' ? BotManager.gamesPerBot : BotManager.gamesPerHuman;
+                        BotManager.setThinking('Opponent: ' + opponentName + ' (' + detectedType + ')', 'Will play ' + maxGames + ' game(s)');
+
+                        // Start game tracking
+                        if (!GameManager.gameInProgress) {
+                            GameManager.startGame();
+                        }
+                    });
                 }
             } else {
                 console.log("Opponent name not found");
@@ -3104,7 +3440,9 @@
         }
     }, 2000);
 
-    // Aggressive opponent detection system
+    // Aggressive opponent detection system - DISABLED to avoid conflicts with enhanced detection
+    // The profile-based detection is now handled in the main game monitoring loop above
+    /*
     setInterval(function() {
         if (!BotManager.isAutoPlayEnabled) return;
 
@@ -3123,26 +3461,41 @@
                     BotManager.log('Profile found: "' + name + '"');
 
                     if (name !== username && name.length > 0) {
-                        BotManager.setThinking('Analyzing opponent: ' + name, 'Checking against known patterns');
-                        var detectedType = BotManager.detectOpponentType(name, null);
-                        BotManager.currentOpponentType = detectedType;
-                        BotManager.currentGameCount = 0;
-                        BotManager.saveSettings();
+                        BotManager.setThinking('Analyzing opponent: ' + name, 'Performing profile-based bot detection');
 
-                        BotManager.log('Opponent detected: ' + name + ' -> ' + detectedType, 'SUCCESS');
+                        // First try profile-based detection
+                        BotManager.performProfileNameDetection(name, function(isBot, profileName) {
+                            var detectedType;
 
-                        var maxGames = detectedType === 'bot' ? BotManager.gamesPerBot : BotManager.gamesPerHuman;
-                        BotManager.setThinking('Opponent: ' + name + ' (' + detectedType + ')', 'Will play ' + maxGames + ' game(s)');
+                            if (isBot) {
+                                detectedType = 'bot';
+                                BotManager.log('Opponent classified as bot via profile detection: ' + name, 'SUCCESS');
+                            } else {
+                                // Fall back to existing detection methods
+                                detectedType = BotManager.detectOpponentType(name, null);
+                                BotManager.log('Profile detection inconclusive, using traditional detection: ' + name + ' -> ' + detectedType);
+                            }
 
-                        if (!GameManager.gameInProgress) {
-                            GameManager.startGame();
-                            BotManager.log('Game started after opponent detection');
-                        }
+                            BotManager.currentOpponentType = detectedType;
+                            BotManager.currentGameCount = 0;
+                            BotManager.saveSettings();
+
+                            BotManager.log('Final opponent classification: ' + name + ' -> ' + detectedType, 'SUCCESS');
+
+                            var maxGames = detectedType === 'bot' ? BotManager.gamesPerBot : BotManager.gamesPerHuman;
+                            BotManager.setThinking('Opponent: ' + name + ' (' + detectedType + ')', 'Will play ' + maxGames + ' game(s)');
+
+                            if (!GameManager.gameInProgress) {
+                                GameManager.startGame();
+                                BotManager.log('Game started after opponent detection');
+                            }
+                        });
                     }
                 });
             });
         }
     }, 1000);
+    */
 
     document.addEventListener('DOMContentLoaded', function() {
         initGame();
