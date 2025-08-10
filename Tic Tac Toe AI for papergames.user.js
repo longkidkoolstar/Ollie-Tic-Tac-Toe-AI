@@ -369,6 +369,9 @@
         enableBotDetectionAlert: true,
         enableBotDetectionGUI: true,
 
+        // AI Strategy settings
+        enableFirstMoveStrategy: false, // When bot goes first: start middle, then diagonal to opponent's corner
+
         // Profile detection tracking
         lastProfileDetectionName: null,
 
@@ -395,6 +398,7 @@
                 GM.getValue('enable24HourSafety', true),
                 GM.getValue('enableBotDetectionAlert', true),
                 GM.getValue('enableBotDetectionGUI', true),
+                GM.getValue('enableFirstMoveStrategy', false),
                 GM.getValue('knownBotNames', JSON.stringify([
                     'Katha', 'Staci', 'Claudetta', 'Charline', 'Carolyne',
                     'Valerye', 'Rowena', 'Arabel', 'Zea', 'Paper Man'
@@ -412,10 +416,11 @@
                 self.enable24HourSafety = values[9];
                 self.enableBotDetectionAlert = values[10];
                 self.enableBotDetectionGUI = values[11];
+                self.enableFirstMoveStrategy = values[12];
 
                 // Load known bot names from storage
                 try {
-                    self.knownBotNames = JSON.parse(values[12]);
+                    self.knownBotNames = JSON.parse(values[13]);
                     self.log('Loaded ' + self.knownBotNames.length + ' known bot names from storage');
                 } catch (e) {
                     self.log('Error loading known bot names, using defaults: ' + e.message, 'WARN');
@@ -446,6 +451,7 @@
             GM.setValue('enable24HourSafety', this.enable24HourSafety);
             GM.setValue('enableBotDetectionAlert', this.enableBotDetectionAlert);
             GM.setValue('enableBotDetectionGUI', this.enableBotDetectionGUI);
+            GM.setValue('enableFirstMoveStrategy', this.enableFirstMoveStrategy);
             GM.setValue('knownBotNames', JSON.stringify(this.knownBotNames));
         },
 
@@ -1311,6 +1317,13 @@
             if (safetyToggle) {
                 safetyToggle.textContent = this.enable24HourSafety ? 'Safety ON' : 'Safety OFF';
                 safetyToggle.style.backgroundColor = this.enable24HourSafety ? '#2ecc71' : '#f39c12';
+            }
+
+            // Update first move strategy toggle if it exists
+            var firstMoveToggle = document.querySelector('#first-move-strategy-toggle');
+            if (firstMoveToggle) {
+                firstMoveToggle.textContent = this.enableFirstMoveStrategy ? 'Strategy ON' : 'Strategy OFF';
+                firstMoveToggle.style.backgroundColor = this.enableFirstMoveStrategy ? '#2ecc71' : '#e74c3c';
             }
 
             // Update known bots display if function exists
@@ -2601,6 +2614,37 @@
             BotManager.saveSettings();
         });
 
+        // First Move Strategy Toggle
+        var firstMoveStrategyLabel = document.createElement('div');
+        firstMoveStrategyLabel.textContent = 'First Move Strategy:';
+        firstMoveStrategyLabel.style.marginBottom = '5px';
+        firstMoveStrategyLabel.style.color = 'white';
+
+        var firstMoveStrategyToggle = document.createElement('button');
+        firstMoveStrategyToggle.id = 'first-move-strategy-toggle';
+        firstMoveStrategyToggle.textContent = BotManager.enableFirstMoveStrategy ? 'Strategy ON' : 'Strategy OFF';
+        firstMoveStrategyToggle.classList.add('btn', 'btn-sm');
+        firstMoveStrategyToggle.style.width = '100%';
+        firstMoveStrategyToggle.style.marginBottom = '10px';
+        firstMoveStrategyToggle.style.backgroundColor = BotManager.enableFirstMoveStrategy ? '#2ecc71' : '#e74c3c';
+        firstMoveStrategyToggle.style.color = 'white';
+
+        firstMoveStrategyToggle.addEventListener('click', function() {
+            BotManager.enableFirstMoveStrategy = !BotManager.enableFirstMoveStrategy;
+            firstMoveStrategyToggle.textContent = BotManager.enableFirstMoveStrategy ? 'Strategy ON' : 'Strategy OFF';
+            firstMoveStrategyToggle.style.backgroundColor = BotManager.enableFirstMoveStrategy ? '#2ecc71' : '#e74c3c';
+            BotManager.saveSettings();
+            BotManager.log('First move strategy ' + (BotManager.enableFirstMoveStrategy ? 'enabled' : 'disabled'));
+        });
+
+        // Strategy Description
+        var strategyDescription = document.createElement('div');
+        strategyDescription.textContent = 'When enabled: Bot starts in center, then plays diagonal to opponent\'s corner';
+        strategyDescription.style.fontSize = '11px';
+        strategyDescription.style.color = '#bdc3c7';
+        strategyDescription.style.marginBottom = '15px';
+        strategyDescription.style.fontStyle = 'italic';
+
         // Performance Stats
         var statsLabel = document.createElement('div');
         statsLabel.textContent = 'Session Stats:';
@@ -2671,6 +2715,9 @@
         strategySettings.appendChild(humanGamesInput);
         strategySettings.appendChild(maxLossesLabel);
         strategySettings.appendChild(maxLossesInput);
+        strategySettings.appendChild(firstMoveStrategyLabel);
+        strategySettings.appendChild(firstMoveStrategyToggle);
+        strategySettings.appendChild(strategyDescription);
         strategySettings.appendChild(statsLabel);
         strategySettings.appendChild(statsDisplay);
         strategySettings.appendChild(exportBtn);
@@ -3183,6 +3230,16 @@
     function findBestMove(board, player) {
         console.log("Current player: " + player); // Debug statement to show the value of the player variable
 
+        // Check if special first-move strategy is enabled
+        if (BotManager.enableFirstMoveStrategy) {
+            var specialMove = getFirstMoveStrategyMove(board, player);
+            if (specialMove) {
+                console.log("Using first-move strategy: " + specialMove.row + "," + specialMove.col);
+                BotManager.log('🎯 First-move strategy activated: (' + specialMove.row + ',' + specialMove.col + ')');
+                return specialMove;
+            }
+        }
+
         var bestVal = -1000;
         var bestMove = { row: -1, col: -1 };
 
@@ -3204,6 +3261,70 @@
 
         console.log("The value of the best Move is: " + bestVal);
         return bestMove;
+    }
+
+    // Special first-move strategy: start middle, then diagonal to opponent's corner
+    function getFirstMoveStrategyMove(board, player) {
+        // Count total moves on board
+        var totalMoves = 0;
+        var opponentMoves = [];
+
+        for (var i = 0; i < 3; i++) {
+            for (var j = 0; j < 3; j++) {
+                if (board[i][j] !== '_') {
+                    totalMoves++;
+                    if (board[i][j] !== player) {
+                        opponentMoves.push({row: i, col: j});
+                    }
+                }
+            }
+        }
+
+        // First move: if board is empty, play center
+        if (totalMoves === 0) {
+            BotManager.log('First move strategy: Playing center (1,1)');
+            return { row: 1, col: 1 };
+        }
+
+        // Second move: if we played center and opponent played a corner, play diagonal corner
+        if (totalMoves === 2 && board[1][1] === player && opponentMoves.length === 1) {
+            var opponentMove = opponentMoves[0];
+
+            // Check if opponent played a corner
+            var corners = [
+                {row: 0, col: 0}, {row: 0, col: 2},
+                {row: 2, col: 0}, {row: 2, col: 2}
+            ];
+
+            var opponentCorner = null;
+            for (var k = 0; k < corners.length; k++) {
+                if (corners[k].row === opponentMove.row && corners[k].col === opponentMove.col) {
+                    opponentCorner = corners[k];
+                    break;
+                }
+            }
+
+            if (opponentCorner) {
+                // Play the diagonal opposite corner
+                var diagonalCorner = getDiagonalCorner(opponentCorner);
+                if (diagonalCorner && board[diagonalCorner.row][diagonalCorner.col] === '_') {
+                    BotManager.log('First move strategy: Playing diagonal corner (' + diagonalCorner.row + ',' + diagonalCorner.col + ') opposite to opponent corner (' + opponentCorner.row + ',' + opponentCorner.col + ')');
+                    return diagonalCorner;
+                }
+            }
+        }
+
+        // Strategy doesn't apply, return null to use normal minimax
+        return null;
+    }
+
+    // Get the diagonal opposite corner
+    function getDiagonalCorner(corner) {
+        if (corner.row === 0 && corner.col === 0) return { row: 2, col: 2 }; // top-left -> bottom-right
+        if (corner.row === 0 && corner.col === 2) return { row: 2, col: 0 }; // top-right -> bottom-left
+        if (corner.row === 2 && corner.col === 0) return { row: 0, col: 2 }; // bottom-left -> top-right
+        if (corner.row === 2 && corner.col === 2) return { row: 0, col: 0 }; // bottom-right -> top-left
+        return null;
     }
 
     function displayBoardAndPlayer() {
