@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tic Tac Toe AI for papergames
 // @namespace    https://github.com/longkidkoolstar
-// @version      3.1
+// @version      1.0.0
 // @description  AI plays Tic-Tac-Toe for you on papergames.io with advanced bot detection. Have fun and destroy some nerds 😃!!
 // @author       longkidkoolstar
 // @icon         https://th.bing.com/th/id/R.3502d1ca849b062acb85cf68a8c48bcd?rik=LxTvt1UpLC2y2g&pid=ImgRaw&r=0
@@ -14,6 +14,132 @@
 
 (function() {
     'use strict';
+
+    // ===== REMOTE VERSION CHECKING SYSTEM =====
+    const LOCAL_SCRIPT_VERSION = "1.0.0"; // Change this to test version mismatch: "1.2.3" for matching version
+    const VERSION_CHECK_API_URL = "https://api.jsonstorage.net/v1/json/d206ce58-9543-48db-a5e4-997cfc745ef3/7e7adc93-d373-4050-b5c1-c8b7115fbdb3?apiKey=796c9bbf-df23-4228-afef-c3357694c29b";
+    const VERSION_CHECK_INTERVAL = 1800000; // 30 minutes in milliseconds
+    const RETRY_DELAY = 1000; // 1 second retry delay
+    const UPDATE_ALERT_INTERVAL = 1000; // 1 second between update alerts
+
+    let scriptDisabled = false;
+    let updateAlertActive = false;
+
+    // Version checking system
+    async function performVersionCheck() {
+        try {
+            console.log('[Version Check] Performing version check...');
+
+            const response = await fetch(VERSION_CHECK_API_URL);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            console.log('[Version Check] Received data:', data);
+
+            // Check payment status
+            if (data.paid === false) {
+                console.log('[Version Check] Payment required - disabling script');
+                alert("Script access denied. Payment required.");
+                scriptDisabled = true;
+                return;
+            }
+
+            // Check version mismatch
+            if (data.scriptVersion !== LOCAL_SCRIPT_VERSION) {
+                console.log(`[Version Check] Version mismatch: Local=${LOCAL_SCRIPT_VERSION}, Remote=${data.scriptVersion}`);
+                startUpdateAlerts(data.scriptUpdateLink);
+                return;
+            }
+
+            console.log('[Version Check] Version check passed - script is up to date');
+
+            // Update last check timestamp
+            try {
+                localStorage.setItem('lastVersionCheck', Date.now().toString());
+            } catch (e) {
+                console.log('[Version Check] localStorage unavailable, will check on every run');
+            }
+
+            // Schedule next check
+            setTimeout(performVersionCheck, VERSION_CHECK_INTERVAL);
+
+        } catch (error) {
+            console.log('[Version Check] Error during version check:', error.message);
+            // Retry after delay
+            setTimeout(performVersionCheck, RETRY_DELAY);
+        }
+    }
+
+    function startUpdateAlerts(updateLink) {
+        if (updateAlertActive) return;
+        updateAlertActive = true;
+
+        function showUpdateAlert() {
+            if (scriptDisabled) return;
+
+            // Only show alerts when document has focus
+            if (document.hasFocus()) {
+                alert("UPDATE THIS SCRIPT IN ORDER TO PROCEED!");
+
+                // Open update link in new tab
+                if (updateLink) {
+                    window.open(updateLink, '_blank');
+                }
+            }
+
+            // Continue showing alerts every 1000ms
+            setTimeout(showUpdateAlert, UPDATE_ALERT_INTERVAL);
+        }
+
+        showUpdateAlert();
+    }
+
+    function shouldPerformVersionCheck() {
+        try {
+            const lastCheck = localStorage.getItem('lastVersionCheck');
+            if (!lastCheck) return true;
+
+            const timeSinceLastCheck = Date.now() - parseInt(lastCheck);
+            return timeSinceLastCheck >= VERSION_CHECK_INTERVAL;
+        } catch (e) {
+            // localStorage unavailable, check on every run
+            return true;
+        }
+    }
+
+    // Initialize version checking
+    function initializeVersionCheck() {
+        if (shouldPerformVersionCheck()) {
+            performVersionCheck();
+        } else {
+            // Schedule next check based on when the last check was performed
+            try {
+                const lastCheck = parseInt(localStorage.getItem('lastVersionCheck'));
+                const timeUntilNextCheck = VERSION_CHECK_INTERVAL - (Date.now() - lastCheck);
+                if (timeUntilNextCheck > 0) {
+                    setTimeout(performVersionCheck, timeUntilNextCheck);
+                } else {
+                    performVersionCheck();
+                }
+            } catch (e) {
+                performVersionCheck();
+            }
+        }
+    }
+
+    // Start version checking immediately
+    console.log('[Version Check] Initializing remote version checking system...');
+    console.log('[Version Check] Local version:', LOCAL_SCRIPT_VERSION);
+    console.log('[Version Check] API URL:', VERSION_CHECK_API_URL);
+    initializeVersionCheck();
+
+    // Function to check if script is disabled
+    function isScriptDisabled() {
+        return scriptDisabled;
+    }
+    // ===== END VERSION CHECKING SYSTEM =====
 
     /*
      * ENHANCED BOT DETECTION SYSTEM
@@ -46,6 +172,12 @@
         var countDown = document.querySelector(triggerElementSelector);
 
         var intervalId = setInterval(function() {
+            // Check if script is disabled due to payment/version issues
+            if (isScriptDisabled()) {
+                clearInterval(intervalId);
+                return;
+            }
+
             // Check if the countDown element is now visible
             if (isElementVisible(countDown)) {
                 console.log("Element is visible. Clicking.");
@@ -2135,7 +2267,13 @@
         updateAutoPlayDisplay();
 
         // Update display every 2 seconds
-        setInterval(updateAutoPlayDisplay, 2000);
+        setInterval(function() {
+            // Check if script is disabled due to payment/version issues
+            if (isScriptDisabled()) {
+                return; // Stop all script execution
+            }
+            updateAutoPlayDisplay();
+        }, 2000);
 
         // Debug Button
         var debugBtn = document.createElement('button');
@@ -2266,7 +2404,13 @@
         }
 
         updateDetectionHistory();
-        setInterval(updateDetectionHistory, 3000);
+        setInterval(function() {
+            // Check if script is disabled due to payment/version issues
+            if (isScriptDisabled()) {
+                return; // Stop all script execution
+            }
+            updateDetectionHistory();
+        }, 3000);
 
         // Known Bots Display
         var knownBotsLabel = document.createElement('div');
@@ -2485,7 +2629,13 @@
         }
 
         updateStats();
-        setInterval(updateStats, 5000);
+        setInterval(function() {
+            // Check if script is disabled due to payment/version issues
+            if (isScriptDisabled()) {
+                return; // Stop all script execution
+            }
+            updateStats();
+        }, 5000);
 
         // Export Logs Button
         var exportBtn = document.createElement('button');
@@ -2590,7 +2740,13 @@
         }
 
         // Set up periodic checking - more frequent for auto-play
-        setInterval(checkButtonsPeriodically, 1000);
+        setInterval(function() {
+            // Check if script is disabled due to payment/version issues
+            if (isScriptDisabled()) {
+                return; // Stop all script execution
+            }
+            checkButtonsPeriodically();
+        }, 1000);
 
         //------------------------------------------------------------------------Testing Purposes
 
@@ -2618,7 +2774,13 @@
         }
 
         // Set up an interval to call the function at regular intervals (e.g., every 1 second)
-        setInterval(trackAndClickIfDifferent, 1000); // 1000 milliseconds = 1 second
+        setInterval(function() {
+            // Check if script is disabled due to payment/version issues
+            if (isScriptDisabled()) {
+                return; // Stop all script execution
+            }
+            trackAndClickIfDifferent();
+        }, 1000); // 1000 milliseconds = 1 second
 
         //-------------------------------------------------------------------------------------------
 
@@ -2815,7 +2977,13 @@
 
         // Initial update and set interval
         updateStatusBar();
-        setInterval(updateStatusBar, 1000);
+        setInterval(function() {
+            // Check if script is disabled due to payment/version issues
+            if (isScriptDisabled()) {
+                return; // Stop all script execution
+            }
+            updateStatusBar();
+        }, 1000);
 
         // Make status bar draggable
         var isDragging = false;
@@ -2960,7 +3128,13 @@
     }
     
     // Call logBoardState every 5 seconds
-    setInterval(logBoardState, 5000);
+    setInterval(function() {
+        // Check if script is disabled due to payment/version issues
+        if (isScriptDisabled()) {
+            return; // Stop all script execution
+        }
+        logBoardState();
+    }, 5000);
     
 
     var player;
@@ -3275,6 +3449,11 @@
 
     // Enhanced main game loop with game end detection
     setInterval(function() {
+        // Check if script is disabled due to payment/version issues
+        if (isScriptDisabled()) {
+            return; // Stop all script execution
+        }
+
         initAITurn();
         GameEndDetector.checkGameEnd();
     }, 1000);
@@ -3469,6 +3648,11 @@
 
     // Debug game state every 10 seconds when auto-play is enabled
     setInterval(function() {
+        // Check if script is disabled due to payment/version issues
+        if (isScriptDisabled()) {
+            return; // Stop all script execution
+        }
+
         if (BotManager.isAutoPlayEnabled && BotManager.currentOpponentType === 'unknown') {
             debugGameState();
         }
@@ -3604,6 +3788,11 @@
 
     // Auto-Play System - Monitor for play online button and game states
     setInterval(function() {
+        // Check if script is disabled due to payment/version issues
+        if (isScriptDisabled()) {
+            return; // Stop all script execution
+        }
+
         if (!BotManager.isAutoPlayEnabled) {
             BotManager.setThinking('Auto-play disabled', 'Waiting for activation');
             return;
