@@ -2,7 +2,7 @@
 // @name         Tic Tac Toe AI for papergames
 // @namespace    https://github.com/longkidkoolstar
 // @version      1.0.0
-// @description  AI plays Tic-Tac-Toe for you on papergames.io with advanced bot detection. Have fun and destroy some nerds 😃!!
+// @description  AI plays Tic-Tac-Toe for you on papergames.io with advanced bot detection and leaderboard position checking. Have fun and destroy some nerds 😃!!
 // @author       longkidkoolstar
 // @icon         https://th.bing.com/th/id/R.3502d1ca849b062acb85cf68a8c48bcd?rik=LxTvt1UpLC2y2g&pid=ImgRaw&r=0
 // @match        https://papergames.io/*
@@ -372,6 +372,10 @@
         // AI Strategy settings
         enableFirstMoveStrategy: false, // When bot goes first: start middle, then diagonal to opponent's corner
 
+        // Leaderboard position checking settings
+        enableLeaderboardCheck: false, // Enable/disable leaderboard position checking
+        leaderboardStopPosition: 16000, // Stop auto-play when reaching this position or better
+
         // Profile detection tracking
         lastProfileDetectionName: null,
 
@@ -399,6 +403,9 @@
                 GM.getValue('enableBotDetectionAlert', true),
                 GM.getValue('enableBotDetectionGUI', true),
                 GM.getValue('enableFirstMoveStrategy', false),
+                GM.getValue('enableLeaderboardCheck', false),
+                GM.getValue('leaderboardStopPosition', 16000),
+                GM.getValue('username', GM.getValue('myUsername', '')),
                 GM.getValue('knownBotNames', JSON.stringify([
                     'Katha', 'Staci', 'Claudetta', 'Charline', 'Carolyne',
                     'Valerye', 'Rowena', 'Arabel', 'Zea', 'Paper Man'
@@ -417,10 +424,14 @@
                 self.enableBotDetectionAlert = values[10];
                 self.enableBotDetectionGUI = values[11];
                 self.enableFirstMoveStrategy = values[12];
+                self.enableLeaderboardCheck = values[13];
+                self.leaderboardStopPosition = values[14];
+                self.myUsername = values[15];
+                self.log('Username loaded from GM storage: "' + self.myUsername + '"');
 
                 // Load known bot names from storage
                 try {
-                    self.knownBotNames = JSON.parse(values[13]);
+                    self.knownBotNames = JSON.parse(values[16]);
                     self.log('Loaded ' + self.knownBotNames.length + ' known bot names from storage');
                 } catch (e) {
                     self.log('Error loading known bot names, using defaults: ' + e.message, 'WARN');
@@ -430,7 +441,20 @@
                     ];
                 }
 
-                self.log('Settings loaded');
+                self.log('Settings loaded. My username: "' + self.myUsername + '"');
+
+                // Try to auto-detect username if it's not set
+                if (!self.myUsername) {
+                    // First attempt after 2 seconds
+                    setTimeout(function() {
+                        if (!self.updateUsernameFromDetection()) {
+                            // If first attempt fails, try again after 5 seconds
+                            setTimeout(function() {
+                                self.updateUsernameFromDetection();
+                            }, 5000);
+                        }
+                    }, 2000);
+                }
 
                 // Update settings UI after loading
                 self.updateSettingsUI();
@@ -452,6 +476,10 @@
             GM.setValue('enableBotDetectionAlert', this.enableBotDetectionAlert);
             GM.setValue('enableBotDetectionGUI', this.enableBotDetectionGUI);
             GM.setValue('enableFirstMoveStrategy', this.enableFirstMoveStrategy);
+            GM.setValue('enableLeaderboardCheck', this.enableLeaderboardCheck);
+            GM.setValue('leaderboardStopPosition', this.leaderboardStopPosition);
+            GM.setValue('myUsername', this.myUsername);
+            GM.setValue('username', this.myUsername); // Save to both keys for compatibility
             GM.setValue('knownBotNames', JSON.stringify(this.knownBotNames));
         },
 
@@ -668,8 +696,8 @@
             }
         },
 
-        // Your username for filtering
-        myUsername: 'notlongkidkoolstar',
+        // Your username for filtering (loaded from GM storage)
+        myUsername: '', // Default fallback
 
         // Detect current opponent name
         detectOpponentName: function() {
@@ -952,6 +980,174 @@
             var hours = Math.floor(runtime / 3600000);
             var minutes = Math.floor((runtime % 3600000) / 60000);
             return hours + 'h ' + minutes + 'm';
+        },
+
+        // Check current leaderboard position
+        checkLeaderboardPosition: function() {
+            if (!this.enableLeaderboardCheck) {
+                this.log('Leaderboard check disabled, skipping position check');
+                return { shouldStop: false, position: null, score: null };
+            }
+
+            if (!this.myUsername) {
+                this.log('Username not set. Please set your username in the settings or wait for auto-detection.', 'WARN');
+                return { shouldStop: false, position: null, score: null };
+            }
+
+            try {
+                this.log('Checking leaderboard position...');
+
+                // Look for leaderboard container
+                var leaderboardContainer = document.querySelector('.leaderboard-container');
+                if (!leaderboardContainer) {
+                    this.log('Leaderboard container not found - may not be on leaderboard page', 'WARN');
+                    return { shouldStop: false, position: null, score: null };
+                }
+
+                // Find all player rows in the leaderboard
+                var playerRows = leaderboardContainer.querySelectorAll('tr[app-tournament-leaderboard-player]');
+                if (!playerRows || playerRows.length === 0) {
+                    this.log('No player rows found in leaderboard', 'WARN');
+                    return { shouldStop: false, position: null, score: null };
+                }
+
+                // Look for our own name in the leaderboard
+                var myUsername = this.myUsername;
+                this.log('Looking for username "' + this.myUsername + '" in leaderboard');
+
+                for (var i = 0; i < playerRows.length; i++) {
+                    var row = playerRows[i];
+                    var nameElement = row.querySelector('.player-name');
+
+                    if (nameElement) {
+                        var playerName = nameElement.textContent.trim();
+                        this.log('Checking leaderboard player: "' + playerName + '"');
+
+                        // Check if this is our row
+                        if (playerName.toLowerCase() === myUsername.toLowerCase()) {
+                            // Get position from the first cell
+                            var positionElement = row.querySelector('td:first-child');
+                            if (positionElement) {
+                                var positionText = positionElement.textContent.trim();
+                                var position = parseInt(positionText.replace(/[^\d]/g, ''));
+
+                                this.log('Found our leaderboard position: ' + position);
+
+                                // Get the score from the last cell (points column)
+                                var scoreElement = row.querySelector('td:last-child');
+                                var score = 0;
+                                
+                                if (scoreElement) {
+                                    var scoreText = scoreElement.textContent.trim();
+                                    score = parseInt(scoreText.replace(/[^\d]/g, ''));
+                                    this.log('Found our leaderboard score: ' + score);
+                                }
+                                
+                                // Check if we should stop (score is better than or equal to stop position)
+                                var shouldStop = score >= this.leaderboardStopPosition;
+
+                                if (shouldStop) {
+                                    this.log('Leaderboard position ' + position + ' reached target score ' + this.leaderboardStopPosition + ' with score ' + score + '. Stopping auto-play.', 'SUCCESS');
+                                }
+
+                                return { shouldStop: shouldStop, position: position, score: score };
+                            }
+                        }
+                    }
+                }
+
+                this.log('Our username "' + this.myUsername + '" not found in visible leaderboard');
+                return { shouldStop: false, position: null, score: null };
+
+            } catch (error) {
+                this.log('Error checking leaderboard position: ' + error.message, 'ERROR');
+                return { shouldStop: false, position: null, score: null };
+            }
+        },
+
+        // Show leaderboard position reached notification
+        showLeaderboardStopNotification: function(position, score) {
+            var notification = document.createElement('div');
+            notification.style.position = 'fixed';
+            notification.style.top = '50%';
+            notification.style.left = '50%';
+            notification.style.transform = 'translate(-50%, -50%)';
+            notification.style.backgroundColor = '#2ecc71';
+            notification.style.color = 'white';
+            notification.style.padding = '20px';
+            notification.style.borderRadius = '10px';
+            notification.style.zIndex = '10001';
+            notification.style.textAlign = 'center';
+            notification.style.fontSize = '16px';
+            notification.style.fontWeight = 'bold';
+            notification.innerHTML = 'LEADERBOARD TARGET REACHED!<br>Position: ' + position + '<br>Score: ' + score + '<br>Auto-play has been stopped.<br>Re-enable in settings if needed.';
+
+            document.body.appendChild(notification);
+
+            setTimeout(function() {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 15000);
+        },
+
+        // Try to automatically detect the current user's username
+        detectMyUsername: function() {
+            try {
+                // Try to find username in various places on the page
+                var selectors = [
+                    // Profile sidebar header
+                    'body > app-root > app-navigation > app-profile-sidenav > div > header > h1',
+                    // Navigation username
+                    '.navbar .username',
+                    '.user-name',
+                    '.profile-name',
+                    // Game room player names (look for the one that's not the opponent)
+                    'app-room-players .player-name'
+                ];
+
+                for (var i = 0; i < selectors.length; i++) {
+                    var elements = document.querySelectorAll(selectors[i]);
+                    for (var j = 0; j < elements.length; j++) {
+                        var element = elements[j];
+                        var username = element.textContent.trim();
+
+                        if (username && username.length > 0 && username.length < 30 &&
+                            !username.toLowerCase().includes('guest') &&
+                            !username.toLowerCase().includes('unknown') &&
+                            username !== this.currentOpponentName) {
+
+                            this.log('Auto-detected username: "' + username + '" from selector: ' + selectors[i]);
+                            return username;
+                        }
+                    }
+                }
+
+                this.log('Could not auto-detect username', 'WARN');
+                return null;
+            } catch (error) {
+                this.log('Error auto-detecting username: ' + error.message, 'ERROR');
+                return null;
+            }
+        },
+
+        // Update username with auto-detection
+        updateUsernameFromDetection: function() {
+            var detectedUsername = this.detectMyUsername();
+            if (detectedUsername && detectedUsername !== this.myUsername) {
+                this.log('Updating username from "' + this.myUsername + '" to "' + detectedUsername + '"');
+                this.myUsername = detectedUsername;
+                this.saveSettings();
+
+                // Update UI if it exists
+                var usernameInput = document.querySelector('#username-input');
+                if (usernameInput) {
+                    usernameInput.value = this.myUsername;
+                }
+
+                return true;
+            }
+            return false;
         },
 
         // Profile name detection for bot identification
@@ -1324,6 +1520,25 @@
             if (firstMoveToggle) {
                 firstMoveToggle.textContent = this.enableFirstMoveStrategy ? 'Strategy ON' : 'Strategy OFF';
                 firstMoveToggle.style.backgroundColor = this.enableFirstMoveStrategy ? '#2ecc71' : '#e74c3c';
+            }
+
+            // Update leaderboard check toggle if it exists
+            var leaderboardToggle = document.querySelector('#leaderboard-check-toggle');
+            if (leaderboardToggle) {
+                leaderboardToggle.textContent = this.enableLeaderboardCheck ? 'Check ON' : 'Check OFF';
+                leaderboardToggle.style.backgroundColor = this.enableLeaderboardCheck ? '#2ecc71' : '#e74c3c';
+            }
+
+            // Update leaderboard position input if it exists
+            var leaderboardInput = document.querySelector('#leaderboard-position-input');
+            if (leaderboardInput) {
+                leaderboardInput.value = this.leaderboardStopPosition;
+            }
+
+            // Update username input if it exists
+            var usernameInput = document.querySelector('#username-input');
+            if (usernameInput) {
+                usernameInput.value = this.myUsername;
             }
 
             // Update known bots display if function exists
@@ -1702,6 +1917,16 @@
     }
 
     function clickPlayOnlineButton() {
+        // Check leaderboard position before clicking play online
+        var leaderboardCheck = BotManager.checkLeaderboardPosition();
+        if (leaderboardCheck.shouldStop) {
+            BotManager.log('Leaderboard position ' + leaderboardCheck.position + ' reached target score ' + leaderboardCheck.score + '. Stopping auto-play.');
+            BotManager.isAutoPlayEnabled = false;
+            BotManager.saveSettings();
+            BotManager.showLeaderboardStopNotification(leaderboardCheck.position, leaderboardCheck.score);
+            return false;
+        }
+
         // First check if we're already in matchmaking
         if (isInMatchmaking()) {
             BotManager.log('Already in matchmaking - "Finding a random player..." detected, skipping play online button search');
@@ -2301,6 +2526,20 @@
             debugPlayAgainButtons();
         });
 
+        // Test Leaderboard Button
+        var testLeaderboardBtn = document.createElement('button');
+        testLeaderboardBtn.textContent = '📊 Test Leaderboard';
+        testLeaderboardBtn.classList.add('btn', 'btn-warning');
+        testLeaderboardBtn.style.width = '100%';
+        testLeaderboardBtn.style.marginTop = '5px';
+        testLeaderboardBtn.style.fontSize = '12px';
+
+        testLeaderboardBtn.addEventListener('click', function() {
+            var result = BotManager.checkLeaderboardPosition();
+            BotManager.log('Leaderboard test result: shouldStop=' + result.shouldStop + ', position=' + result.position);
+            alert('Leaderboard Check Result:\nShould Stop: ' + result.shouldStop + '\nPosition: ' + result.position + '\nTarget: ' + BotManager.leaderboardStopPosition + '\nCheck Enabled: ' + BotManager.enableLeaderboardCheck + '\nUsername: "' + BotManager.myUsername + '"');
+        });
+
         autoPlaySettings.appendChild(autoPlayToggle);
         autoPlaySettings.appendChild(statusDisplay);
         autoPlaySettings.appendChild(lossDisplay);
@@ -2308,6 +2547,7 @@
         autoPlaySettings.appendChild(emergencyStop);
         autoPlaySettings.appendChild(safetyReset);
         autoPlaySettings.appendChild(debugBtn);
+        autoPlaySettings.appendChild(testLeaderboardBtn);
 
         // Create Detection Settings
         var detectionSettings = document.createElement('div');
@@ -2645,6 +2885,125 @@
         strategyDescription.style.marginBottom = '15px';
         strategyDescription.style.fontStyle = 'italic';
 
+        // Leaderboard Position Check Toggle
+        var leaderboardCheckLabel = document.createElement('div');
+        leaderboardCheckLabel.textContent = 'Leaderboard Position Check:';
+        leaderboardCheckLabel.style.marginBottom = '5px';
+        leaderboardCheckLabel.style.color = 'white';
+        leaderboardCheckLabel.style.marginTop = '15px';
+
+        var leaderboardCheckToggle = document.createElement('button');
+        leaderboardCheckToggle.id = 'leaderboard-check-toggle';
+        leaderboardCheckToggle.textContent = BotManager.enableLeaderboardCheck ? 'Check ON' : 'Check OFF';
+        leaderboardCheckToggle.classList.add('btn', 'btn-sm');
+        leaderboardCheckToggle.style.width = '100%';
+        leaderboardCheckToggle.style.marginBottom = '10px';
+        leaderboardCheckToggle.style.backgroundColor = BotManager.enableLeaderboardCheck ? '#2ecc71' : '#e74c3c';
+        leaderboardCheckToggle.style.color = 'white';
+
+        leaderboardCheckToggle.addEventListener('click', function() {
+            BotManager.enableLeaderboardCheck = !BotManager.enableLeaderboardCheck;
+            leaderboardCheckToggle.textContent = BotManager.enableLeaderboardCheck ? 'Check ON' : 'Check OFF';
+            leaderboardCheckToggle.style.backgroundColor = BotManager.enableLeaderboardCheck ? '#2ecc71' : '#e74c3c';
+            BotManager.saveSettings();
+            BotManager.log('Leaderboard position check ' + (BotManager.enableLeaderboardCheck ? 'enabled' : 'disabled'));
+        });
+
+        // Leaderboard Stop Score Input
+        var leaderboardPositionLabel = document.createElement('div');
+        leaderboardPositionLabel.textContent = 'Stop at Score (or higher):';
+        leaderboardPositionLabel.style.marginBottom = '5px';
+        leaderboardPositionLabel.style.color = 'white';
+        leaderboardPositionLabel.style.marginTop = '10px';
+
+        var leaderboardPositionInput = document.createElement('input');
+        leaderboardPositionInput.id = 'leaderboard-position-input';
+        leaderboardPositionInput.type = 'number';
+        leaderboardPositionInput.value = BotManager.leaderboardStopPosition;
+        leaderboardPositionInput.min = '1';
+        leaderboardPositionInput.max = '50000';
+        leaderboardPositionInput.style.width = '100%';
+        leaderboardPositionInput.style.padding = '5px';
+        leaderboardPositionInput.style.marginBottom = '10px';
+        leaderboardPositionInput.style.backgroundColor = '#2c3e50';
+        leaderboardPositionInput.style.color = 'white';
+        leaderboardPositionInput.style.border = '1px solid #ccc';
+        leaderboardPositionInput.style.borderRadius = '3px';
+
+        leaderboardPositionInput.addEventListener('change', function() {
+            var newPosition = parseInt(leaderboardPositionInput.value) || 16000;
+            if (newPosition < 1) newPosition = 1;
+            if (newPosition > 50000) newPosition = 50000;
+            BotManager.leaderboardStopPosition = newPosition;
+            leaderboardPositionInput.value = newPosition;
+            BotManager.saveSettings();
+            BotManager.log('Leaderboard stop position set to: ' + newPosition);
+        });
+
+        var leaderboardDescription = document.createElement('div');
+        leaderboardDescription.style.color = '#bdc3c7';
+        leaderboardDescription.style.fontSize = '11px';
+        leaderboardDescription.style.marginBottom = '15px';
+        leaderboardDescription.style.fontStyle = 'italic';
+        leaderboardDescription.textContent = 'When enabled, auto-play will stop when you reach the specified leaderboard position or better. Default: 16000 (16k).';
+
+        // Username Setting
+        var usernameLabel = document.createElement('div');
+        usernameLabel.textContent = 'Your Username (for leaderboard detection):';
+        usernameLabel.style.marginBottom = '5px';
+        usernameLabel.style.color = 'white';
+        usernameLabel.style.marginTop = '15px';
+
+        var usernameInput = document.createElement('input');
+        usernameInput.id = 'username-input';
+        usernameInput.type = 'text';
+        usernameInput.value = BotManager.myUsername;
+        usernameInput.placeholder = 'Enter your username';
+        usernameInput.style.width = '100%';
+        usernameInput.style.padding = '5px';
+        usernameInput.style.marginBottom = '10px';
+        usernameInput.style.backgroundColor = '#2c3e50';
+        usernameInput.style.color = 'white';
+        usernameInput.style.border = '1px solid #ccc';
+        usernameInput.style.borderRadius = '3px';
+
+        usernameInput.addEventListener('change', function() {
+            var newUsername = usernameInput.value.trim();
+            if (newUsername.length > 0) {
+                BotManager.myUsername = newUsername;
+                BotManager.saveSettings();
+                BotManager.log('Username updated to: "' + newUsername + '"');
+            } else {
+                usernameInput.value = BotManager.myUsername; // Reset to current value if empty
+            }
+        });
+
+        // Auto-detect username button
+        var autoDetectBtn = document.createElement('button');
+        autoDetectBtn.textContent = '🔍 Auto-Detect';
+        autoDetectBtn.classList.add('btn', 'btn-sm');
+        autoDetectBtn.style.width = '100%';
+        autoDetectBtn.style.marginBottom = '10px';
+        autoDetectBtn.style.backgroundColor = '#3498db';
+        autoDetectBtn.style.color = 'white';
+        autoDetectBtn.style.fontSize = '12px';
+
+        autoDetectBtn.addEventListener('click', function() {
+            var detected = BotManager.updateUsernameFromDetection();
+            if (detected) {
+                alert('Username auto-detected and updated to: "' + BotManager.myUsername + '"');
+            } else {
+                alert('Could not auto-detect username. Please enter it manually.');
+            }
+        });
+
+        var usernameDescription = document.createElement('div');
+        usernameDescription.style.color = '#bdc3c7';
+        usernameDescription.style.fontSize = '11px';
+        usernameDescription.style.marginBottom = '15px';
+        usernameDescription.style.fontStyle = 'italic';
+        usernameDescription.textContent = 'Enter your exact username as it appears on the leaderboard, or use Auto-Detect to find it automatically.';
+
         // Performance Stats
         var statsLabel = document.createElement('div');
         statsLabel.textContent = 'Session Stats:';
@@ -2718,6 +3077,15 @@
         strategySettings.appendChild(firstMoveStrategyLabel);
         strategySettings.appendChild(firstMoveStrategyToggle);
         strategySettings.appendChild(strategyDescription);
+        strategySettings.appendChild(leaderboardCheckLabel);
+        strategySettings.appendChild(leaderboardCheckToggle);
+        strategySettings.appendChild(leaderboardPositionLabel);
+        strategySettings.appendChild(leaderboardPositionInput);
+        strategySettings.appendChild(leaderboardDescription);
+        strategySettings.appendChild(usernameLabel);
+        strategySettings.appendChild(usernameInput);
+        strategySettings.appendChild(autoDetectBtn);
+        strategySettings.appendChild(usernameDescription);
         strategySettings.appendChild(statsLabel);
         strategySettings.appendChild(statsDisplay);
         strategySettings.appendChild(exportBtn);
@@ -2766,6 +3134,16 @@
 
             // New auto-play system - more aggressive play online clicking
             if (BotManager.isAutoPlayEnabled && !isInGame()) {
+                // Check leaderboard position before clicking play online
+                var leaderboardCheck = BotManager.checkLeaderboardPosition();
+                if (leaderboardCheck.shouldStop) {
+                    BotManager.log('Leaderboard position ' + leaderboardCheck.position + ' reached target score ' + leaderboardCheck.score + '. Stopping auto-play.');
+                    BotManager.isAutoPlayEnabled = false;
+                    BotManager.saveSettings();
+                    BotManager.showLeaderboardStopNotification(leaderboardCheck.position, leaderboardCheck.score);
+                    return;
+                }
+
                 // Check for play online button and click it
                 var playOnlineSelectors = [
                     "button.btn-secondary.flex-grow-1",
@@ -3782,6 +4160,36 @@
     // Make debug functions available globally for manual testing
     window.debugTicTacToeBot = debugGameState;
     window.debugPlayAgainButtons = debugPlayAgainButtons;
+    window.testLeaderboardCheck = function() {
+        var result = BotManager.checkLeaderboardPosition();
+        console.log('Leaderboard check result:', result);
+        console.log('Settings - Enabled:', BotManager.enableLeaderboardCheck, 'Target Score:', BotManager.leaderboardStopPosition);
+        if (result.score) {
+            console.log('Current Score:', result.score, 'Target Score:', BotManager.leaderboardStopPosition);
+        }
+        return result;
+    };
+    
+    // Debug function to check GM storage values
+    window.checkGMStorage = function() {
+        Promise.all([
+            GM.getValue('username', 'not set'),
+            GM.getValue('myUsername', 'not set')
+        ]).then(function(values) {
+            var usernameValue = values[0];
+            var myUsernameValue = values[1];
+            
+            console.log('GM Storage Values:');
+            console.log('username:', usernameValue);
+            console.log('myUsername:', myUsernameValue);
+            console.log('BotManager.myUsername:', BotManager.myUsername);
+            
+            alert('GM Storage Values:\n' +
+                  'username: "' + usernameValue + '"\n' +
+                  'myUsername: "' + myUsernameValue + '"\n' +
+                  'BotManager.myUsername: "' + BotManager.myUsername + '"');
+        });
+    };
 
     // Manual test function for play again button
     window.testPlayAgainButton = function() {
@@ -3940,6 +4348,16 @@
             for (var i = 0; i < playOnlineSelectors.length; i++) {
                 var playButton = document.querySelector(playOnlineSelectors[i]);
                 if (playButton && playButton.textContent.toLowerCase().includes('play')) {
+                    // Check leaderboard position before clicking
+                    var leaderboardCheck = BotManager.checkLeaderboardPosition();
+                    if (leaderboardCheck.shouldStop) {
+                        BotManager.log('Leaderboard position ' + leaderboardCheck.position + ' reached target score ' + leaderboardCheck.score + '. Stopping auto-play.');
+                        BotManager.isAutoPlayEnabled = false;
+                        BotManager.saveSettings();
+                        BotManager.showLeaderboardStopNotification(leaderboardCheck.position, leaderboardCheck.score);
+                        return;
+                    }
+
                     BotManager.setThinking('Play button found', 'Will click in 2 seconds');
                     // Wait a bit before clicking to avoid spam
                     setTimeout(function() {
