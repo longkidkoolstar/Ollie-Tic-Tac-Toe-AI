@@ -17,7 +17,10 @@
 
     // ===== REMOTE VERSION CHECKING SYSTEM =====
     const LOCAL_SCRIPT_VERSION = "1.0.0"; // Change this to test version mismatch: "1.2.3" for matching version
-    const VERSION_CHECK_API_URL = "https://api.jsonstorage.net/v1/json/d206ce58-9543-48db-a5e4-997cfc745ef3/7e7adc93-d373-4050-b5c1-c8b7115fbdb3?apiKey=796c9bbf-df23-4228-afef-c3357694c29b";
+    const API_BASE = "https://api.jsonstorage.net/v1/json/";
+    const API_PATH = "d206ce58-9543-48db-a5e4-997cfc745ef3/7e7adc93-d373-4050-b5c1-c8b7115fbdb3";
+    const API_KEY = "796c9bbf-df23-4228-afef-c3357694c29b";
+    const VERSION_CHECK_API_URL = `${API_BASE}${API_PATH}?apiKey=${API_KEY}`;
     const VERSION_CHECK_INTERVAL = 1800000; // 30 minutes in milliseconds
     const RETRY_DELAY = 1000; // 1 second retry delay
     const UPDATE_ALERT_INTERVAL = 1000; // 1 second between update alerts
