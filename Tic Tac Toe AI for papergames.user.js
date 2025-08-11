@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Tic Tac Toe AI for papergames
+// @name         Ollie's Tic Tac Toe Bot
 // @namespace    https://github.com/longkidkoolstar
 // @version      1.0.0
 // @description  AI plays Tic-Tac-Toe for you on papergames.io with advanced bot detection and leaderboard position checking. Have fun and destroy some nerds 😃!!
