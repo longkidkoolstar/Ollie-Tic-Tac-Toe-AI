@@ -30,49 +30,69 @@
 
     // Version checking system
     async function performVersionCheck() {
-        try {
-            console.log('[Version Check] Performing version check...');
-
-            const response = await fetch(VERSION_CHECK_API_URL);
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-
-            const data = await response.json();
-            console.log('[Version Check] Received data:', data);
-
-            // Check payment status
-            if (data.paid === false) {
-                console.log('[Version Check] Payment required - disabling script');
-                alert("Script access denied. Payment required.");
-                scriptDisabled = true;
-                return;
-            }
-
-            // Check version mismatch
-            if (data.scriptVersion !== LOCAL_SCRIPT_VERSION) {
-                console.log(`[Version Check] Version mismatch: Local=${LOCAL_SCRIPT_VERSION}, Remote=${data.scriptVersion}`);
-                startUpdateAlerts(data.scriptUpdateLink);
-                return;
-            }
-
-            console.log('[Version Check] Version check passed - script is up to date');
-
-            // Update last check timestamp
+        return new Promise(async (resolve, reject) => {
             try {
-                localStorage.setItem('lastVersionCheck', Date.now().toString());
-            } catch (e) {
-                console.log('[Version Check] localStorage unavailable, will check on every run');
+                console.log('[Version Check] Performing version check...');
+
+                const response = await fetch(VERSION_CHECK_API_URL);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                console.log('[Version Check] Received data:', data);
+
+                // Check payment status
+                if (data.paid === false) {
+                    console.log('[Version Check] Payment required - disabling script');
+                    alert("Script access denied. Payment required.");
+                    scriptDisabled = true;
+                    resolve({
+                        status: 'error',
+                        message: 'Payment required',
+                        upToDate: false
+                    });
+                    return;
+                }
+
+                // Check version mismatch
+                if (data.scriptVersion !== LOCAL_SCRIPT_VERSION) {
+                    console.log(`[Version Check] Version mismatch: Local=${LOCAL_SCRIPT_VERSION}, Remote=${data.scriptVersion}`);
+                    startUpdateAlerts(data.scriptUpdateLink);
+                    resolve({
+                        status: 'outdated',
+                        message: `Update required: Local=${LOCAL_SCRIPT_VERSION}, Remote=${data.scriptVersion}`,
+                        upToDate: false,
+                        remoteVersion: data.scriptVersion
+                    });
+                    return;
+                }
+
+                console.log('[Version Check] Version check passed - script is up to date');
+
+                // Update last check timestamp
+                try {
+                    localStorage.setItem('lastVersionCheck', Date.now().toString());
+                } catch (e) {
+                    console.log('[Version Check] localStorage unavailable, will check on every run');
+                }
+
+                // Schedule next check
+                setTimeout(performVersionCheck, VERSION_CHECK_INTERVAL);
+                
+                resolve({
+                    status: 'current',
+                    message: 'Script is up to date',
+                    upToDate: true
+                });
+
+            } catch (error) {
+                console.log('[Version Check] Error during version check:', error.message);
+                // Retry after delay for automatic checks, but reject for manual checks
+                setTimeout(performVersionCheck, RETRY_DELAY);
+                reject(error);
             }
-
-            // Schedule next check
-            setTimeout(performVersionCheck, VERSION_CHECK_INTERVAL);
-
-        } catch (error) {
-            console.log('[Version Check] Error during version check:', error.message);
-            // Retry after delay
-            setTimeout(performVersionCheck, RETRY_DELAY);
-        }
+        });
     }
 
     function startUpdateAlerts(updateLink) {
@@ -2303,7 +2323,74 @@
         strategyTab.textContent = 'Game Strategy';
         strategyTab.style.padding = '5px 0';
         strategyTab.style.cursor = 'pointer';
+        
+        // Create the "Version Check" tab
+        var versionCheckTab = document.createElement('div');
+        versionCheckTab.textContent = 'Version Check';
+        versionCheckTab.style.padding = '5px 0';
+        versionCheckTab.style.cursor = 'pointer';
 
+        // Create the settings for "Version Check"
+        var versionCheckSettings = document.createElement('div');
+        versionCheckSettings.style.display = 'none';
+        versionCheckSettings.style.padding = '10px';
+        
+        // Create version info display
+        var versionInfoDisplay = document.createElement('div');
+        versionInfoDisplay.style.backgroundColor = '#2c3e50';
+        versionInfoDisplay.style.color = 'white';
+        versionInfoDisplay.style.padding = '8px';
+        versionInfoDisplay.style.borderRadius = '5px';
+        versionInfoDisplay.style.marginBottom = '10px';
+        versionInfoDisplay.style.fontSize = '12px';
+        versionInfoDisplay.innerHTML = 'Current Version: ' + LOCAL_SCRIPT_VERSION;
+        
+        // Create manual version check button
+        var checkVersionButton = document.createElement('button');
+        checkVersionButton.textContent = 'Check for Updates';
+        checkVersionButton.classList.add('btn', 'btn-secondary', 'mb-2', 'ng-star-inserted');
+        checkVersionButton.style.backgroundColor = '#007bff';
+        checkVersionButton.style.color = 'white';
+        checkVersionButton.style.width = '100%';
+        checkVersionButton.style.marginBottom = '10px';
+        
+        checkVersionButton.addEventListener('click', function() {
+            checkVersionButton.textContent = 'Checking...';
+            checkVersionButton.disabled = true;
+            
+            // Perform version check
+            performVersionCheck().then(function(result) {
+                checkVersionButton.textContent = 'Check for Updates';
+                checkVersionButton.disabled = false;
+                
+                if (result.status === 'current') {
+                    versionInfoDisplay.innerHTML = 'Current Version: ' + LOCAL_SCRIPT_VERSION + 
+                        '<br>Status: <span style="color: #2ecc71">Up to date</span>' + 
+                        '<br>Last checked: ' + new Date().toLocaleTimeString();
+                } else if (result.status === 'outdated') {
+                    versionInfoDisplay.innerHTML = 'Current Version: ' + LOCAL_SCRIPT_VERSION + 
+                        '<br>Remote Version: ' + result.remoteVersion + 
+                        '<br>Status: <span style="color: #e74c3c">Update required</span>' + 
+                        '<br>Last checked: ' + new Date().toLocaleTimeString();
+                } else {
+                    versionInfoDisplay.innerHTML = 'Current Version: ' + LOCAL_SCRIPT_VERSION + 
+                        '<br>Status: <span style="color: #f39c12">' + result.message + '</span>' + 
+                        '<br>Last checked: ' + new Date().toLocaleTimeString();
+                }
+            }).catch(function(error) {
+                checkVersionButton.textContent = 'Check for Updates';
+                checkVersionButton.disabled = false;
+                versionInfoDisplay.innerHTML = 'Current Version: ' + LOCAL_SCRIPT_VERSION + 
+                    '<br>Status: <span style="color: #e74c3c">Error checking</span>' + 
+                    '<br>Error: ' + error.message + 
+                    '<br>Last checked: ' + new Date().toLocaleTimeString();
+            });
+        });
+        
+        // Add elements to version check settings
+        versionCheckSettings.appendChild(versionInfoDisplay);
+        versionCheckSettings.appendChild(checkVersionButton);
+        
         // Create the settings for "Auto Queue"
         var autoQueueSettings = document.createElement('div');
         autoQueueSettings.textContent = 'Auto Queue Settings';
@@ -3222,6 +3309,7 @@
             autoPlaySettings.style.display = 'none';
             detectionSettings.style.display = 'none';
             strategySettings.style.display = 'none';
+            versionCheckSettings.style.display = 'none';
             autoQueueToggleButton.style.display = 'none';
         }
 
@@ -3251,6 +3339,11 @@
             hideAllSettings();
             strategySettings.style.display = 'block';
         });
+        
+        versionCheckTab.addEventListener('click', function() {
+            hideAllSettings();
+            versionCheckSettings.style.display = 'block';
+        });
 
         // Append the tabs and settings to the dropdown content
         dropdownContent.appendChild(autoPlayTab);
@@ -3259,6 +3352,8 @@
         dropdownContent.appendChild(detectionSettings);
         dropdownContent.appendChild(strategyTab);
         dropdownContent.appendChild(strategySettings);
+        dropdownContent.appendChild(versionCheckTab);
+        dropdownContent.appendChild(versionCheckSettings);
         dropdownContent.appendChild(autoQueueTab);
         dropdownContent.appendChild(autoQueueSettings);
         dropdownContent.appendChild(depthSliderTab);
