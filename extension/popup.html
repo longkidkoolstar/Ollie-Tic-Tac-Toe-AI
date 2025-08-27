@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Extension</title>
+    <style>
+        body {
+            width: 300px;
+            font-family: Arial, sans-serif;
+            background-color: #1b2837;
+            color: white;
+            padding: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+            border-radius: 5px;
+        }
+        h3 {
+            margin-bottom: 10px;
+        }
+        button {
+            width: 100%;
+            margin-bottom: 5px;
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            opacity: 0.8;
+        }
+        .dropdown-content {
+            display: none;
+            padding: 10px;
+            background-color: #2e3846;
+            border-radius: 5px;
+        }
+        .slider-label {
+            margin: 10px 0;
+        }
+        .depth-popup {
+            position: absolute;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            z-index: 9999;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h3>Settings</h3>
+    <button id="logoutButton">Logout</button>
+    <button id="toggleButton">Settings</button>
+    <div id="dropdownContent" class="dropdown-content">
+        <h4>Auto Queue</h4>
+        <button id="autoQueueToggleButton">Auto Queue Off</button>
+        <h4 class="slider-label">Depth Slider</h4>
+        <input type="range" id="depthSlider" min="1" max="100" value="100">
+        <div id="depthValue" class="depth-popup"></div>
+        <h4>Script Toggle</h4> <!-- New header for the toggle -->
+        <button id="toggleScriptButton">Script Off</button> <!-- New toggle button -->
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>
