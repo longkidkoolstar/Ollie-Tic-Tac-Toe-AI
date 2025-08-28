@@ -57,6 +57,7 @@
     let previousNumber = null; // Track the previous number for the countdown
     let checkIntervalId = null; // Store the interval ID for button checking
     let trackIntervalId = null; // Store the interval ID for countdown tracking
+    let isFirstMoveStrategyEnabled = false; // Track the First Move Strategy state
    
 
     // Function to simulate clicking on a grid cell
@@ -78,12 +79,14 @@
 
     // Function to receive settings from popup.js
     async function receiveSettings() {
-        chrome.storage.sync.get(['depth', 'isAutoPlayEnabled'], function(result) {
+        chrome.storage.sync.get(['depth', 'isAutoPlayEnabled', 'isFirstMoveStrategyEnabled'], function(result) {
             const depth = result.depth !== undefined ? result.depth : '100'; // Default to '100'
             isAutoPlayOn = result.isAutoPlayEnabled || false; // Set auto-play state
+            isFirstMoveStrategyEnabled = result.isFirstMoveStrategyEnabled || false; // Set first move strategy state
     
             console.log('Depth:', depth);
             console.log('Auto Play On:', isAutoPlayOn);
+            console.log('First Move Strategy Enabled:', isFirstMoveStrategyEnabled);
     
             // Start or stop the auto play based on the current state
             if (isAutoPlayOn) {
@@ -1039,6 +1042,13 @@
             sendResponse({success: true});
         }
         
+        if (request.action === 'toggleFirstMoveStrategy') {
+            // Toggle first move strategy setting
+            isFirstMoveStrategyEnabled = request.enabled;
+            console.log('First Move Strategy toggled:', isFirstMoveStrategyEnabled);
+            sendResponse({success: true});
+        }
+        
         return true; // Keep message channel open for async response
      });
 
@@ -1103,8 +1113,83 @@ function updateBoard(squareId) {
 }
 
 
+    // Special first-move strategy: start middle, then diagonal to opponent's corner
+    function getFirstMoveStrategyMove(board, player) {
+        if (!isFirstMoveStrategyEnabled) return null;
+        
+        // Count total moves on board
+        var totalMoves = 0;
+        var opponentMoves = [];
+
+        for (var i = 0; i < 3; i++) {
+            for (var j = 0; j < 3; j++) {
+                if (board[i][j] !== '_') {
+                    totalMoves++;
+                    if (board[i][j] !== player) {
+                        opponentMoves.push({row: i, col: j});
+                    }
+                }
+            }
+        }
+
+        // First move: if board is empty, play center
+        if (totalMoves === 0) {
+            console.log('First move strategy: Playing center (1,1)');
+            return { row: 1, col: 1 };
+        }
+
+        // Second move: if we played center and opponent played a corner, play diagonal corner
+        if (totalMoves === 2 && board[1][1] === player && opponentMoves.length === 1) {
+            var opponentMove = opponentMoves[0];
+
+            // Check if opponent played a corner
+            var corners = [
+                {row: 0, col: 0}, {row: 0, col: 2},
+                {row: 2, col: 0}, {row: 2, col: 2}
+            ];
+
+            var opponentCorner = null;
+            for (var k = 0; k < corners.length; k++) {
+                if (corners[k].row === opponentMove.row && corners[k].col === opponentMove.col) {
+                    opponentCorner = corners[k];
+                    break;
+                }
+            }
+
+            if (opponentCorner) {
+                // Play the diagonal opposite corner
+                var diagonalCorner = getDiagonalCorner(opponentCorner);
+                if (diagonalCorner && board[diagonalCorner.row][diagonalCorner.col] === '_') {
+                    console.log('First move strategy: Playing diagonal corner (' + diagonalCorner.row + ',' + diagonalCorner.col + ') opposite to opponent corner (' + opponentCorner.row + ',' + opponentCorner.col + ')');
+                    return diagonalCorner;
+                }
+            }
+        }
+
+        // Strategy doesn't apply, return null to use normal minimax
+        return null;
+    }
+
+    // Get the diagonal opposite corner
+    function getDiagonalCorner(corner) {
+        if (corner.row === 0 && corner.col === 0) return { row: 2, col: 2 }; // top-left -> bottom-right
+        if (corner.row === 0 && corner.col === 2) return { row: 2, col: 0 }; // top-right -> bottom-left
+        if (corner.row === 2 && corner.col === 0) return { row: 0, col: 2 }; // bottom-left -> top-right
+        if (corner.row === 2 && corner.col === 2) return { row: 0, col: 0 }; // bottom-right -> top-left
+        return null;
+    }
+
     function findBestMove(board, player) {
         //console.log("Current player: " + player); // Debug statement to show the value of the player variable
+
+        // Check if special first-move strategy is enabled
+        if (isFirstMoveStrategyEnabled) {
+            var specialMove = getFirstMoveStrategyMove(board, player);
+            if (specialMove) {
+                console.log("Using first-move strategy: " + specialMove.row + "," + specialMove.col);
+                return specialMove;
+            }
+        }
 
         var bestVal = -1000;
         var bestMove = { row: -1, col: -1 };

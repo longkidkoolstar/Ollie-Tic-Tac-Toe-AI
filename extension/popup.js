@@ -125,6 +125,34 @@ depthSlider.addEventListener('input', function(event) {
     }, 2000);
 });
 
+// First Move Strategy Toggle
+let isFirstMoveStrategyEnabled = false;
+
+chrome.storage.sync.get(['isFirstMoveStrategyEnabled'], function(result) {
+    isFirstMoveStrategyEnabled = result.isFirstMoveStrategyEnabled || false;
+    updateFirstMoveStrategyButton();
+});
+
+function updateFirstMoveStrategyButton() {
+    const button = document.getElementById('firstMoveStrategyToggle');
+    button.textContent = isFirstMoveStrategyEnabled ? 'First Move Strategy: On' : 'First Move Strategy: Off';
+    button.style.backgroundColor = isFirstMoveStrategyEnabled ? 'green' : 'red';
+}
+
+document.getElementById('firstMoveStrategyToggle').addEventListener('click', function() {
+    isFirstMoveStrategyEnabled = !isFirstMoveStrategyEnabled;
+    chrome.storage.sync.set({ isFirstMoveStrategyEnabled: isFirstMoveStrategyEnabled });
+    updateFirstMoveStrategyButton();
+    
+    // Send message to content script to update first move strategy setting
+    chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+            action: 'toggleFirstMoveStrategy',
+            enabled: isFirstMoveStrategyEnabled
+        });
+    });
+});
+
 // Bot Detection Settings
 let botDetectionSettings = {
     maxBotGames: 7,
