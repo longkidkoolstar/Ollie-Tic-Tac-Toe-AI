@@ -67,26 +67,34 @@ document.getElementById('toggleButton').addEventListener('click', function() {
     dropdownContent.style.display = dropdownContent.style.display === 'none' ? 'block' : 'none';
 });
 
-// Auto Queue Toggle
-let isAutoQueueOn = false; // Track the state
+// Auto Play Toggle
+let isAutoPlayOn = false; // Track the state
 
-chrome.storage.sync.get(['isToggled'], function(result) {
-    if (result.isToggled) {
-        isAutoQueueOn = true;
-        document.getElementById('autoQueueToggleButton').textContent = 'Auto Queue On';
-        document.getElementById('autoQueueToggleButton').style.backgroundColor = 'green';
+chrome.storage.sync.get(['isAutoPlayEnabled'], function(result) {
+    if (result.isAutoPlayEnabled) {
+        isAutoPlayOn = true;
+        document.getElementById('autoPlayToggleButton').textContent = 'Auto Play On';
+        document.getElementById('autoPlayToggleButton').style.backgroundColor = 'green';
     }
 });
 
-document.getElementById('autoQueueToggleButton').addEventListener('click', toggleAutoQueue);
+document.getElementById('autoPlayToggleButton').addEventListener('click', toggleAutoPlay);
 
-function toggleAutoQueue() {
-    isAutoQueueOn = !isAutoQueueOn;
-    chrome.storage.sync.set({ isToggled: isAutoQueueOn });
+function toggleAutoPlay() {
+    isAutoPlayOn = !isAutoPlayOn;
+    chrome.storage.sync.set({ isAutoPlayEnabled: isAutoPlayOn });
 
-    const button = document.getElementById('autoQueueToggleButton');
-    button.textContent = isAutoQueueOn ? 'Auto Queue On' : 'Auto Queue Off';
-    button.style.backgroundColor = isAutoQueueOn ? 'green' : 'red';
+    const button = document.getElementById('autoPlayToggleButton');
+    button.textContent = isAutoPlayOn ? 'Auto Play On' : 'Auto Play Off';
+    button.style.backgroundColor = isAutoPlayOn ? 'green' : 'red';
+    
+    // Send message to content script to update auto play setting
+    chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+            action: 'toggleAutoPlay',
+            enabled: isAutoPlayOn
+        });
+    });
 }
 
 // Depth Slider
@@ -116,3 +124,92 @@ depthSlider.addEventListener('input', function(event) {
         popup.style.display = 'none';
     }, 2000);
 });
+
+// Bot Detection Settings
+let botDetectionSettings = {
+    maxBotGames: 7,
+    maxHumanGames: 1,
+    enableBotDetectionAlert: true,
+    enableBotDetectionGUI: true,
+    enableConsoleLogging: true
+};
+
+// Load bot detection settings
+chrome.storage.sync.get(['botDetectionSettings'], function(result) {
+    if (result.botDetectionSettings) {
+        botDetectionSettings = Object.assign(botDetectionSettings, result.botDetectionSettings);
+    }
+    updateBotDetectionUI();
+});
+
+// Update bot detection UI elements
+function updateBotDetectionUI() {
+    document.getElementById('maxBotGamesSlider').value = botDetectionSettings.maxBotGames;
+    document.getElementById('maxBotGamesValue').textContent = botDetectionSettings.maxBotGames;
+    document.getElementById('maxHumanGamesSlider').value = botDetectionSettings.maxHumanGames;
+    document.getElementById('maxHumanGamesValue').textContent = botDetectionSettings.maxHumanGames;
+    
+    const alertButton = document.getElementById('botDetectionAlertToggle');
+    alertButton.textContent = 'Bot Alert: ' + (botDetectionSettings.enableBotDetectionAlert ? 'On' : 'Off');
+    alertButton.style.backgroundColor = botDetectionSettings.enableBotDetectionAlert ? 'green' : 'red';
+    
+    const guiButton = document.getElementById('botDetectionGUIToggle');
+    guiButton.textContent = 'Bot GUI: ' + (botDetectionSettings.enableBotDetectionGUI ? 'On' : 'Off');
+    guiButton.style.backgroundColor = botDetectionSettings.enableBotDetectionGUI ? 'green' : 'red';
+    
+    const consoleButton = document.getElementById('consoleLoggingToggle');
+    consoleButton.textContent = 'Console Log: ' + (botDetectionSettings.enableConsoleLogging ? 'On' : 'Off');
+    consoleButton.style.backgroundColor = botDetectionSettings.enableConsoleLogging ? 'green' : 'red';
+}
+
+// Save bot detection settings
+function saveBotDetectionSettings() {
+    chrome.storage.sync.set({ botDetectionSettings: botDetectionSettings });
+    // Send settings to content script
+    chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+        chrome.tabs.sendMessage(tabs[0].id, { botDetectionSettings: botDetectionSettings });
+    });
+}
+
+// Max Bot Games Slider
+document.getElementById('maxBotGamesSlider').addEventListener('input', function(event) {
+    botDetectionSettings.maxBotGames = parseInt(event.target.value);
+    document.getElementById('maxBotGamesValue').textContent = botDetectionSettings.maxBotGames;
+    saveBotDetectionSettings();
+});
+
+// Max Human Games Slider
+document.getElementById('maxHumanGamesSlider').addEventListener('input', function(event) {
+    botDetectionSettings.maxHumanGames = parseInt(event.target.value);
+    document.getElementById('maxHumanGamesValue').textContent = botDetectionSettings.maxHumanGames;
+    saveBotDetectionSettings();
+});
+
+// Bot Detection Alert Toggle
+document.getElementById('botDetectionAlertToggle').addEventListener('click', function() {
+    botDetectionSettings.enableBotDetectionAlert = !botDetectionSettings.enableBotDetectionAlert;
+    updateBotDetectionUI();
+    saveBotDetectionSettings();
+});
+
+// Bot Detection GUI Toggle
+document.getElementById('botDetectionGUIToggle').addEventListener('click', function() {
+    botDetectionSettings.enableBotDetectionGUI = !botDetectionSettings.enableBotDetectionGUI;
+    updateBotDetectionUI();
+    saveBotDetectionSettings();
+});
+
+// Console Logging Toggle
+document.getElementById('consoleLoggingToggle').addEventListener('click', function() {
+    botDetectionSettings.enableConsoleLogging = !botDetectionSettings.enableConsoleLogging;
+    updateBotDetectionUI();
+    saveBotDetectionSettings();
+});
+
+// Reset Game Counters
+document.getElementById('resetCountersButton').addEventListener('click', function() {
+    chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+        chrome.tabs.sendMessage(tabs[0].id, { action: 'resetCounters' });
+    });
+    alert('Game counters have been reset!');
+})

@@ -54,11 +54,26 @@
     <button id="logoutButton">Logout</button>
     <button id="toggleButton">Settings</button>
     <div id="dropdownContent" class="dropdown-content">
-        <h4>Auto Queue</h4>
-        <button id="autoQueueToggleButton">Auto Queue Off</button>
+        <h4>Auto Play</h4>
+        <button id="autoPlayToggleButton">Auto Play Off</button>
         <h4 class="slider-label">Depth Slider</h4>
         <input type="range" id="depthSlider" min="1" max="100" value="100">
         <div id="depthValue" class="depth-popup"></div>
+        
+        <h4>Bot Detection Settings</h4>
+        <div class="slider-label">
+            <label for="maxBotGamesSlider">Max Bot Games: <span id="maxBotGamesValue">7</span></label>
+            <input type="range" id="maxBotGamesSlider" min="1" max="20" value="7">
+        </div>
+        <div class="slider-label">
+            <label for="maxHumanGamesSlider">Max Human Games: <span id="maxHumanGamesValue">1</span></label>
+            <input type="range" id="maxHumanGamesSlider" min="1" max="10" value="1">
+        </div>
+        <button id="botDetectionAlertToggle">Bot Alert: On</button>
+        <button id="botDetectionGUIToggle">Bot GUI: On</button>
+        <button id="consoleLoggingToggle">Console Log: On</button>
+        <button id="resetCountersButton">Reset Game Counters</button>
+        
         <h4>Script Toggle</h4> <!-- New header for the toggle -->
         <button id="toggleScriptButton">Script Off</button> <!-- New toggle button -->
     </div>
