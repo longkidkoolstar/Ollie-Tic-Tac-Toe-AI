@@ -448,6 +448,10 @@
         }
         
         BotManager.log('Decision: ' + (shouldPlayAgain ? 'PLAY AGAIN' : 'LEAVE') + ' - ' + reason);
+        BotManager.setThinking(
+            shouldPlayAgain ? 'Playing Again' : 'Finding New Opponent',
+            reason
+        );
         BotManager.saveSettings();
         
         // Wait for buttons to appear, then execute decision
@@ -484,6 +488,11 @@
             if (checkLeaderboardPosition()) {
                 // Target position reached, auto-play stopped
                 return;
+            }
+            
+            // Check if we're in matchmaking
+            if (isInMatchmaking()) {
+                BotManager.setThinking('Matchmaking Active', 'Finding a random player...');
             }
             
             // Check if rematch buttons are visible (actual game end)
@@ -543,8 +552,36 @@
     // Start monitoring settings for changes
     monitorSettings();
     
+    // Initialize GUI after a short delay to ensure page is loaded
+    setTimeout(function() {
+        BotManager.initializeGUI();
+    }, 1000);
+    
     
 
+
+    // Helper function to check if we're in matchmaking
+    function isInMatchmaking() {
+        var matchmakingSelectors = [
+            '.display-6.mb-4.text-center.animated.fast.fadeIn.ng-star-inserted',
+            '.display-6.mb-4.text-center',
+            '[class*="display-6"]'
+        ];
+
+        for (var i = 0; i < matchmakingSelectors.length; i++) {
+            var element = document.querySelector(matchmakingSelectors[i]);
+            if (element) {
+                var text = element.textContent.toLowerCase();
+                if (text.includes('finding a random player') ||
+                    text.includes('looking for opponent') ||
+                    text.includes('searching for player') ||
+                    text.includes('matchmaking')) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 
     //------------------------------------------------
     // Bot Detection System
@@ -568,6 +605,368 @@
         log: function(message, type) {
             var prefix = type === 'ERROR' ? '❌' : type === 'WARN' ? '⚠️' : type === 'SUCCESS' ? '✅' : 'ℹ️';
             console.log(prefix + ' [Bot Detection] ' + message);
+        },
+
+        // Set thinking status and update GUI
+        setThinking: function(status, details) {
+            this.currentThinking = {
+                status: status || 'Idle',
+                details: details || '',
+                timestamp: new Date().toLocaleTimeString()
+            };
+            this.updateStatusBar();
+            this.log('Status: ' + status + (details ? ' - ' + details : ''));
+        },
+
+        // Initialize and create the persistent status bar GUI
+        initializeGUI: function() {
+            if (document.getElementById('ttt-ai-status-bar')) return; // Already initialized
+            
+            // Create main status bar container
+            var statusBar = document.createElement('div');
+            statusBar.id = 'ttt-ai-status-bar';
+            statusBar.style.cssText = `
+                position: fixed;
+                top: 10px;
+                right: 10px;
+                background: linear-gradient(135deg, #2c3e50, #34495e);
+                color: white;
+                padding: 12px 16px;
+                border-radius: 8px;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                font-size: 13px;
+                z-index: 10000;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                min-width: 280px;
+                max-width: 400px;
+                border: 1px solid #34495e;
+                cursor: move;
+                user-select: none;
+            `;
+            
+            // Status content container
+            var statusContent = document.createElement('div');
+            statusContent.id = 'ttt-status-content';
+            statusContent.style.cssText = `
+                margin-bottom: 8px;
+                line-height: 1.4;
+            `;
+            
+            // Bot thinking display
+            var thinkingDisplay = document.createElement('div');
+            thinkingDisplay.id = 'ttt-thinking-display';
+            thinkingDisplay.style.cssText = `
+                background: rgba(52, 73, 94, 0.7);
+                padding: 8px 10px;
+                border-radius: 4px;
+                margin-bottom: 8px;
+                font-size: 12px;
+                border-left: 3px solid #3498db;
+            `;
+            
+            // Quick controls container
+            var quickControls = document.createElement('div');
+            quickControls.id = 'ttt-quick-controls';
+            quickControls.style.cssText = `
+                display: flex;
+                gap: 6px;
+                flex-wrap: wrap;
+            `;
+            
+            // Auto-play toggle button
+            var autoPlayBtn = document.createElement('button');
+            autoPlayBtn.id = 'ttt-autoplay-toggle';
+            autoPlayBtn.textContent = 'Auto-Play: OFF';
+            autoPlayBtn.style.cssText = `
+                background: #e74c3c;
+                color: white;
+                border: none;
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-size: 11px;
+                cursor: pointer;
+                transition: background 0.3s;
+            `;
+            autoPlayBtn.onclick = function() {
+                BotManager.toggleAutoPlay();
+            };
+            
+            // Reset counters button
+            var resetBtn = document.createElement('button');
+            resetBtn.textContent = 'Reset';
+            resetBtn.style.cssText = `
+                background: #f39c12;
+                color: white;
+                border: none;
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-size: 11px;
+                cursor: pointer;
+                transition: background 0.3s;
+            `;
+            resetBtn.onclick = function() {
+                BotManager.resetCounters();
+                BotManager.setThinking('Counters Reset', 'All game statistics cleared');
+            };
+            
+            // Stats display button
+            var statsBtn = document.createElement('button');
+            statsBtn.textContent = 'Stats';
+            statsBtn.style.cssText = `
+                background: #9b59b6;
+                color: white;
+                border: none;
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-size: 11px;
+                cursor: pointer;
+                transition: background 0.3s;
+            `;
+            statsBtn.onclick = function() {
+                BotManager.showStats();
+            };
+            
+            // Assemble the status bar
+            quickControls.appendChild(autoPlayBtn);
+            quickControls.appendChild(resetBtn);
+            quickControls.appendChild(statsBtn);
+            
+            statusBar.appendChild(statusContent);
+            statusBar.appendChild(thinkingDisplay);
+            statusBar.appendChild(quickControls);
+            
+            document.body.appendChild(statusBar);
+            
+            // Add drag functionality
+            this.makeDraggable(statusBar);
+            
+            // Initialize with default status
+            this.setThinking('Extension Loaded', 'Tic Tac Toe AI Ready');
+        },
+
+        // Make an element draggable
+        makeDraggable: function(element) {
+            var isDragging = false;
+            var currentX;
+            var currentY;
+            var initialX;
+            var initialY;
+            var xOffset = 0;
+            var yOffset = 0;
+
+            element.addEventListener('mousedown', function(e) {
+                if (e.target === element || e.target.parentNode === element) {
+                    initialX = e.clientX - xOffset;
+                    initialY = e.clientY - yOffset;
+                    isDragging = true;
+                }
+            });
+
+            document.addEventListener('mousemove', function(e) {
+                if (isDragging) {
+                    e.preventDefault();
+                    currentX = e.clientX - initialX;
+                    currentY = e.clientY - initialY;
+                    xOffset = currentX;
+                    yOffset = currentY;
+                    
+                    // Keep element within viewport bounds
+                    var rect = element.getBoundingClientRect();
+                    var maxX = window.innerWidth - rect.width;
+                    var maxY = window.innerHeight - rect.height;
+                    
+                    currentX = Math.max(0, Math.min(currentX, maxX));
+                    currentY = Math.max(0, Math.min(currentY, maxY));
+                    
+                    element.style.transform = `translate(${currentX}px, ${currentY}px)`;
+                    element.style.right = 'auto';
+                    element.style.left = '0px';
+                    element.style.top = '0px';
+                }
+            });
+
+            document.addEventListener('mouseup', function() {
+                isDragging = false;
+            });
+        },
+
+        // Update the status bar with current information
+        updateStatusBar: function() {
+            var statusContent = document.getElementById('ttt-status-content');
+            var thinkingDisplay = document.getElementById('ttt-thinking-display');
+            var autoPlayBtn = document.getElementById('ttt-autoplay-toggle');
+            
+            if (!statusContent || !thinkingDisplay) return;
+            
+            // Update main status content
+            var statusHTML = `
+                <div style="font-weight: bold; color: #3498db;">🎯 Tic Tac Toe AI</div>
+                <div style="font-size: 11px; margin-top: 2px;">
+                    Bot Games: ${this.botGamesPlayed} | Human Games: ${this.humanGamesPlayed}
+                </div>
+            `;
+            
+            if (this.currentOpponent) {
+                var opponentGames = this.opponentGameCounts[this.currentOpponent] || 0;
+                var isBot = this.isKnownBot(this.currentOpponent);
+                statusHTML += `
+                    <div style="font-size: 11px; margin-top: 2px;">
+                        vs ${isBot ? '🤖' : '👤'} ${this.currentOpponent}: ${opponentGames} games
+                    </div>
+                `;
+            }
+            
+            statusContent.innerHTML = statusHTML;
+            
+            // Update thinking display
+            if (this.currentThinking) {
+                thinkingDisplay.innerHTML = `
+                    <div style="font-weight: bold;">💭 ${this.currentThinking.status}</div>
+                    ${this.currentThinking.details ? `<div style="margin-top: 2px; opacity: 0.9;">${this.currentThinking.details}</div>` : ''}
+                    <div style="font-size: 10px; opacity: 0.7; margin-top: 2px;">${this.currentThinking.timestamp}</div>
+                `;
+            }
+            
+            // Update auto-play button
+            if (autoPlayBtn) {
+                var isAutoPlayOn = this.settings.isAutoPlayEnabled;
+                autoPlayBtn.textContent = 'Auto-Play: ' + (isAutoPlayOn ? 'ON' : 'OFF');
+                autoPlayBtn.style.background = isAutoPlayOn ? '#27ae60' : '#e74c3c';
+            }
+        },
+
+        // Toggle auto-play functionality
+        toggleAutoPlay: function() {
+            this.updateAutoPlaySetting(!this.settings.isAutoPlayEnabled);
+            this.setThinking(
+                this.settings.isAutoPlayEnabled ? 'Auto-Play Enabled' : 'Auto-Play Disabled',
+                this.settings.isAutoPlayEnabled ? 'Bot will automatically play games' : 'Manual control active'
+            );
+        },
+
+        // Show statistics in a modal GUI
+        showStats: function() {
+            // Remove existing modal if present
+            var existingModal = document.getElementById('ttt-stats-modal');
+            if (existingModal) {
+                existingModal.remove();
+                return;
+            }
+            
+            var totalGames = this.botGamesPlayed + this.humanGamesPlayed;
+            var botPercentage = totalGames > 0 ? ((this.botGamesPlayed / totalGames) * 100).toFixed(1) : 0;
+            
+            // Create modal overlay
+            var modalOverlay = document.createElement('div');
+            modalOverlay.id = 'ttt-stats-modal';
+            modalOverlay.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.7);
+                z-index: 20000;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            `;
+            
+            // Create modal content
+            var modalContent = document.createElement('div');
+            modalContent.style.cssText = `
+                background: linear-gradient(135deg, #2c3e50, #34495e);
+                color: white;
+                padding: 24px;
+                border-radius: 12px;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                max-width: 500px;
+                max-height: 80vh;
+                overflow-y: auto;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+                border: 1px solid #34495e;
+                position: relative;
+            `;
+            
+            // Create close button
+            var closeBtn = document.createElement('button');
+            closeBtn.innerHTML = '×';
+            closeBtn.style.cssText = `
+                position: absolute;
+                top: 8px;
+                right: 12px;
+                background: none;
+                border: none;
+                color: #bdc3c7;
+                font-size: 24px;
+                cursor: pointer;
+                padding: 0;
+                width: 30px;
+                height: 30px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 50%;
+                transition: all 0.3s;
+            `;
+            closeBtn.onmouseover = function() {
+                this.style.background = 'rgba(231, 76, 60, 0.8)';
+                this.style.color = 'white';
+            };
+            closeBtn.onmouseout = function() {
+                this.style.background = 'none';
+                this.style.color = '#bdc3c7';
+            };
+            closeBtn.onclick = function() {
+                modalOverlay.remove();
+            };
+            
+            // Create stats content
+            var statsHTML = `
+                <h2 style="margin: 0 0 20px 0; color: #3498db; font-size: 20px;">📊 Game Statistics</h2>
+                <div style="line-height: 1.6; font-size: 14px;">
+                    <div style="background: rgba(52, 73, 94, 0.7); padding: 12px; border-radius: 6px; margin-bottom: 16px;">
+                        <div><strong>Total Games:</strong> ${totalGames}</div>
+                        <div><strong>Bot Games:</strong> ${this.botGamesPlayed} (${botPercentage}%)</div>
+                        <div><strong>Human Games:</strong> ${this.humanGamesPlayed}</div>
+                    </div>
+                    <div style="background: rgba(52, 73, 94, 0.7); padding: 12px; border-radius: 6px; margin-bottom: 16px;">
+                        <div><strong>Known Bots:</strong> ${this.knownBots.length}</div>
+                        <div><strong>Detection History:</strong> ${this.detectionHistory.length} entries</div>
+                    </div>
+            `;
+            
+            if (Object.keys(this.opponentGameCounts).length > 0) {
+                statsHTML += `
+                    <div style="background: rgba(52, 73, 94, 0.7); padding: 12px; border-radius: 6px;">
+                        <div style="font-weight: bold; margin-bottom: 8px; color: #3498db;">Opponent Breakdown:</div>
+                `;
+                for (var opponent in this.opponentGameCounts) {
+                    var games = this.opponentGameCounts[opponent];
+                    var type = this.isKnownBot(opponent) ? '🤖' : '👤';
+                    statsHTML += `<div style="margin: 4px 0;">${type} <strong>${opponent}:</strong> ${games} games</div>`;
+                }
+                statsHTML += '</div>';
+            }
+            
+            statsHTML += '</div>';
+            
+            modalContent.innerHTML = statsHTML;
+            modalContent.appendChild(closeBtn);
+            modalOverlay.appendChild(modalContent);
+            
+            // Close modal when clicking overlay
+            modalOverlay.onclick = function(e) {
+                if (e.target === modalOverlay) {
+                    modalOverlay.remove();
+                }
+            };
+            
+            // Add to page
+            document.body.appendChild(modalOverlay);
+            
+            // Make modal draggable
+            this.makeDraggable(modalContent);
         },
 
         // Profile name detection for bot identification
@@ -1031,6 +1430,7 @@
             if (enabled) {
                 startAutoPlay();
                 this.log('Auto Play enabled');
+                this.setThinking('Auto-Play Enabled', 'Starting matchmaking...');
                 // Automatically click play online button when auto play is first enabled
                 setTimeout(function() {
                     clickPlayOnlineButton();
@@ -1038,6 +1438,7 @@
             } else {
                 stopAutoPlay();
                 this.log('Auto Play disabled');
+                this.setThinking('Auto-Play Disabled', 'Manual control active');
             }
         },
         
@@ -1627,6 +2028,7 @@ function updateBoard(squareId) {
     // Handle new game detection and bot detection
     function handleNewGame() {
         BotManager.log('=== NEW GAME DETECTED ===');
+        BotManager.setThinking('New Game Started', 'Detecting opponent...');
         gameState.isGameActive = true;
         gameState.gameEndDetected = false;
         gameState.opponentDetected = false;
@@ -1646,6 +2048,7 @@ function updateBoard(squareId) {
     function handleGameEndDetection() {
         if (!gameState.gameEndDetected) {
             BotManager.log('=== GAME END DETECTED ===');
+            BotManager.setThinking('Game Ended', 'Deciding next action...');
             gameState.gameEndDetected = true;
             gameState.isGameActive = false;
             
@@ -1681,6 +2084,7 @@ function updateBoard(squareId) {
             
             if (opponentName) {
                 BotManager.log('Found opponent: ' + opponentName);
+                BotManager.setThinking('Opponent Found', 'Analyzing: ' + opponentName);
                 
                 // Check if this is a different opponent
                 if (previousOpponent && previousOpponent !== opponentName) {
@@ -1698,19 +2102,23 @@ function updateBoard(squareId) {
                 BotManager.currentOpponent = opponentName;
                 
                 // Perform bot detection
+                BotManager.setThinking('Analyzing Opponent', 'Checking profile for bot detection...');
                 BotManager.performProfileNameDetection(opponentName, function(isBot, profileName) {
                     gameState.opponentDetected = true;
                     
                     if (isBot) {
                         BotManager.log('Opponent "' + opponentName + '" detected as BOT');
+                        BotManager.setThinking('Bot Detected', '🤖 ' + opponentName + ' is a bot');
                         BotManager.displayBotDetectionNotification(opponentName, true, 'Profile name mismatch');
                     } else {
                         BotManager.log('Opponent "' + opponentName + '" detected as HUMAN');
+                        BotManager.setThinking('Human Detected', '👤 ' + opponentName + ' is human');
                         BotManager.displayBotDetectionNotification(opponentName, false, 'Profile name matches');
                     }
                 });
             } else {
                 BotManager.log('Could not find opponent name', 'WARN');
+                BotManager.setThinking('Waiting for Opponent', 'Unable to detect opponent name');
             }
         });
     }
