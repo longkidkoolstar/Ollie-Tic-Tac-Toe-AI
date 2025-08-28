@@ -75,6 +75,19 @@
         <button id="firstMoveStrategyToggle">First Move Strategy: Off</button>
         <button id="resetCountersButton">Reset Game Counters</button>
         
+        <h4>Leaderboard Settings</h4>
+        <button id="leaderboardCheckToggle">Leaderboard Check: Off</button>
+        <div class="slider-label">
+            <label for="leaderboardStopInput">Stop at Score: <span id="leaderboardStopValue">16000</span></label>
+            <input type="number" id="leaderboardStopInput" min="1" max="50000" value="16000" style="width: 100%; padding: 5px; margin: 5px 0; background-color: #2c3e50; color: white; border: 1px solid #ccc; border-radius: 3px;">
+        </div>
+        <div class="slider-label">
+            <label for="usernameInput">Username:</label>
+            <input type="text" id="usernameInput" placeholder="Enter your username" style="width: 100%; padding: 5px; margin: 5px 0; background-color: #2c3e50; color: white; border: 1px solid #ccc; border-radius: 3px;">
+        </div>
+        <button id="autoDetectUsernameButton" style="background-color: #3498db;">Auto-Detect Username</button>
+        <button id="testLeaderboardButton" style="background-color: #f39c12;">Test Leaderboard</button>
+        
         <h4>Script Toggle</h4> <!-- New header for the toggle -->
         <button id="toggleScriptButton">Script Off</button> <!-- New toggle button -->
     </div>

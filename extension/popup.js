@@ -162,12 +162,27 @@ let botDetectionSettings = {
     enableConsoleLogging: true
 };
 
+// Leaderboard Settings
+let leaderboardSettings = {
+    enableLeaderboardCheck: false,
+    leaderboardStopPosition: 16000,
+    username: ''
+};
+
 // Load bot detection settings
 chrome.storage.sync.get(['botDetectionSettings'], function(result) {
     if (result.botDetectionSettings) {
         botDetectionSettings = Object.assign(botDetectionSettings, result.botDetectionSettings);
     }
     updateBotDetectionUI();
+});
+
+// Load leaderboard settings
+chrome.storage.sync.get(['leaderboardSettings'], function(result) {
+    if (result.leaderboardSettings) {
+        leaderboardSettings = Object.assign(leaderboardSettings, result.leaderboardSettings);
+    }
+    updateLeaderboardUI();
 });
 
 // Update bot detection UI elements
@@ -190,12 +205,35 @@ function updateBotDetectionUI() {
     consoleButton.style.backgroundColor = botDetectionSettings.enableConsoleLogging ? 'green' : 'red';
 }
 
+// Update leaderboard UI elements
+function updateLeaderboardUI() {
+    const checkToggle = document.getElementById('leaderboardCheckToggle');
+    checkToggle.textContent = 'Leaderboard Check: ' + (leaderboardSettings.enableLeaderboardCheck ? 'On' : 'Off');
+    checkToggle.style.backgroundColor = leaderboardSettings.enableLeaderboardCheck ? 'green' : 'red';
+    
+    document.getElementById('leaderboardStopInput').value = leaderboardSettings.leaderboardStopPosition;
+    document.getElementById('leaderboardStopValue').textContent = leaderboardSettings.leaderboardStopPosition;
+    document.getElementById('usernameInput').value = leaderboardSettings.username;
+}
+
 // Save bot detection settings
 function saveBotDetectionSettings() {
     chrome.storage.sync.set({ botDetectionSettings: botDetectionSettings });
     // Send settings to content script
     chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
         chrome.tabs.sendMessage(tabs[0].id, { botDetectionSettings: botDetectionSettings });
+    });
+}
+
+// Save leaderboard settings
+function saveLeaderboardSettings() {
+    chrome.storage.sync.set({ leaderboardSettings: leaderboardSettings });
+    // Send settings to content script
+    chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+        chrome.tabs.sendMessage(tabs[0].id, { 
+            action: 'updateLeaderboardSettings',
+            leaderboardSettings: leaderboardSettings 
+        });
     });
 }
 
@@ -234,10 +272,62 @@ document.getElementById('consoleLoggingToggle').addEventListener('click', functi
     saveBotDetectionSettings();
 });
 
-// Reset Game Counters
+// Reset Counters Button
 document.getElementById('resetCountersButton').addEventListener('click', function() {
     chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
         chrome.tabs.sendMessage(tabs[0].id, { action: 'resetCounters' });
     });
-    alert('Game counters have been reset!');
-})
+});
+
+// Leaderboard Check Toggle
+document.getElementById('leaderboardCheckToggle').addEventListener('click', function() {
+    leaderboardSettings.enableLeaderboardCheck = !leaderboardSettings.enableLeaderboardCheck;
+    updateLeaderboardUI();
+    saveLeaderboardSettings();
+});
+
+// Leaderboard Stop Position Input
+document.getElementById('leaderboardStopInput').addEventListener('input', function(event) {
+    let newPosition = parseInt(event.target.value) || 16000;
+    if (newPosition < 1) newPosition = 1;
+    if (newPosition > 50000) newPosition = 50000;
+    leaderboardSettings.leaderboardStopPosition = newPosition;
+    document.getElementById('leaderboardStopValue').textContent = newPosition;
+    event.target.value = newPosition;
+    saveLeaderboardSettings();
+});
+
+// Username Input
+document.getElementById('usernameInput').addEventListener('input', function(event) {
+    leaderboardSettings.username = event.target.value.trim();
+    saveLeaderboardSettings();
+});
+
+// Auto-Detect Username Button
+document.getElementById('autoDetectUsernameButton').addEventListener('click', function() {
+    chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+        chrome.tabs.sendMessage(tabs[0].id, { action: 'autoDetectUsername' }, function(response) {
+            if (response && response.success && response.username) {
+                leaderboardSettings.username = response.username;
+                updateLeaderboardUI();
+                saveLeaderboardSettings();
+                alert('Username auto-detected: ' + response.username);
+            } else {
+                alert('Could not auto-detect username. Please enter it manually.');
+            }
+        });
+    });
+});
+
+// Test Leaderboard Button
+document.getElementById('testLeaderboardButton').addEventListener('click', function() {
+    chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+        chrome.tabs.sendMessage(tabs[0].id, { action: 'testLeaderboard' }, function(response) {
+            if (response && response.success) {
+                alert('Leaderboard test completed. Check console for details.');
+            } else {
+                alert('Failed to test leaderboard functionality.');
+            }
+        });
+    });
+});

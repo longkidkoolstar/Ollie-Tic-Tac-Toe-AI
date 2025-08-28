@@ -58,6 +58,13 @@
     let checkIntervalId = null; // Store the interval ID for button checking
     let trackIntervalId = null; // Store the interval ID for countdown tracking
     let isFirstMoveStrategyEnabled = false; // Track the First Move Strategy state
+    
+    // Leaderboard settings
+    let leaderboardSettings = {
+        enableLeaderboardCheck: false,
+        leaderboardStopPosition: 16000,
+        username: ''
+    };
    
 
     // Function to simulate clicking on a grid cell
@@ -473,6 +480,12 @@
     // Function to check and click buttons periodically
     function checkButtonsPeriodically() {
         if (isAutoPlayOn) {
+            // Check leaderboard position before continuing auto-play
+            if (checkLeaderboardPosition()) {
+                // Target position reached, auto-play stopped
+                return;
+            }
+            
             // Check if rematch buttons are visible (actual game end)
             var juicyButtons = document.querySelectorAll('app-juicy-button');
             var legacyButtons = document.querySelectorAll("body > app-root > app-navigation > div > div.d-flex.flex-column.h-100.w-100 > main > app-room > div > div > div.col-md-9.col-lg-8.bg-gray-000.h-100.position-relative.overflow-hidden.ng-tns-c1645232060-14 > div > div > div > app-re-match > div > button");
@@ -1020,6 +1033,171 @@
     // Initialize bot manager
     BotManager.loadSettings();
     
+    // Leaderboard Functions
+    function checkLeaderboardPosition() {
+        if (!leaderboardSettings.enableLeaderboardCheck || !leaderboardSettings.username) {
+            return;
+        }
+        
+        try {
+            // Find leaderboard container
+            const leaderboardContainer = document.querySelector('.leaderboard-container, .leaderboard, [class*="leaderboard"], [id*="leaderboard"], [app-tournament-leaderboard-player]');
+            if (!leaderboardContainer) {
+                console.log('Leaderboard container not found');
+                return;
+            }
+            
+            // Find player rows in leaderboard - updated selectors based on actual HTML structure
+            const playerRows = leaderboardContainer.querySelectorAll('tr[app-tournament-leaderboard-player], .player-row, .leaderboard-row, [class*="player"], [class*="row"]');
+            if (playerRows.length === 0) {
+                console.log('No player rows found in leaderboard');
+                return;
+            }
+            
+            // Search for user's position
+            for (let i = 0; i < playerRows.length; i++) {
+                const row = playerRows[i];
+                const nameElement = row.querySelector('.player-name, .name, [class*="name"], span[title]');
+                
+                if (nameElement && nameElement.textContent.trim() === leaderboardSettings.username) {
+                    const positionElement = row.querySelector('.position, .rank, [class*="position"], [class*="rank"], td:first-child');
+                    const scoreElement = row.querySelector('.score, .points, [class*="score"], [class*="points"], td:last-child');
+                    
+                    const position = positionElement ? parseInt(positionElement.textContent) : i + 1;
+                    const score = scoreElement ? parseInt(scoreElement.textContent.replace(/[^0-9]/g, '')) : 0;
+                    
+                    console.log(`Current leaderboard position: ${position}, Score: ${score}`);
+                    
+                    // Check if we should stop auto-play
+                    if (score >= leaderboardSettings.leaderboardStopPosition) {
+                        console.log(`Target score reached! Stopping auto-play at score: ${score}`);
+                        stopAutoPlay();
+                        showLeaderboardStopNotification(position, score);
+                        return true;
+                    }
+                    
+                    return false;
+                }
+            }
+            
+            console.log('Username not found in leaderboard');
+        } catch (error) {
+            console.error('Error checking leaderboard position:', error);
+        }
+        
+        return false;
+    }
+    
+    function showLeaderboardStopNotification(position, score) {
+        // Remove any existing notification
+        const existingNotification = document.getElementById('leaderboard-stop-notification');
+        if (existingNotification) {
+            existingNotification.remove();
+        }
+        
+        // Create notification element
+        const notification = document.createElement('div');
+        notification.id = 'leaderboard-stop-notification';
+        notification.innerHTML = `
+            <div style="
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: linear-gradient(135deg, #4CAF50, #45a049);
+                color: white;
+                padding: 15px 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                z-index: 10000;
+                font-family: Arial, sans-serif;
+                font-size: 14px;
+                max-width: 300px;
+                border: 2px solid #2E7D32;
+            ">
+                <div style="font-weight: bold; margin-bottom: 8px; font-size: 16px;">
+                    🎯 Target Reached!
+                </div>
+                <div style="margin-bottom: 5px;">
+                    Position: #${position}
+                </div>
+                <div style="margin-bottom: 10px;">
+                    Score: ${score.toLocaleString()}
+                </div>
+                <div style="font-size: 12px; opacity: 0.9;">
+                    Auto-play has been stopped.
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(notification);
+        
+        // Auto-remove notification after 10 seconds
+        setTimeout(() => {
+            if (notification && notification.parentNode) {
+                notification.remove();
+            }
+        }, 10000);
+    }
+    
+    function autoDetectUsername() {
+        try {
+            // Try multiple selectors to find username
+            const usernameSelectors = [
+                '.username',
+                '.player-name',
+                '.user-name',
+                '[class*="username"]',
+                '[class*="player-name"]',
+                '[class*="user-name"]',
+                '.profile-name',
+                '[data-username]',
+                '.account-name'
+            ];
+            
+            for (const selector of usernameSelectors) {
+                const element = document.querySelector(selector);
+                if (element && element.textContent.trim()) {
+                    const detectedUsername = element.textContent.trim();
+                    leaderboardSettings.username = detectedUsername;
+                    console.log('Username auto-detected:', detectedUsername);
+                    return detectedUsername;
+                }
+            }
+            
+            // Try to get from URL or other sources
+            const urlMatch = window.location.href.match(/user[=/]([^&/?]+)/i);
+            if (urlMatch && urlMatch[1]) {
+                const detectedUsername = decodeURIComponent(urlMatch[1]);
+                leaderboardSettings.username = detectedUsername;
+                console.log('Username detected from URL:', detectedUsername);
+                return detectedUsername;
+            }
+            
+            console.log('Could not auto-detect username');
+            return null;
+        } catch (error) {
+            console.error('Error auto-detecting username:', error);
+            return null;
+        }
+    }
+    
+    function testLeaderboard() {
+        console.log('Testing leaderboard functionality...');
+        console.log('Current settings:', leaderboardSettings);
+        
+        if (!leaderboardSettings.enableLeaderboardCheck) {
+            console.log('Leaderboard check is disabled');
+            return;
+        }
+        
+        if (!leaderboardSettings.username) {
+            console.log('No username set for leaderboard check');
+            return;
+        }
+        
+        checkLeaderboardPosition();
+    }
+    
     // Listen for messages from popup
     chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         if (request.botDetectionSettings) {
@@ -1027,6 +1205,13 @@
             BotManager.settings = Object.assign(BotManager.settings, request.botDetectionSettings);
             BotManager.saveSettings();
             BotManager.log('Bot detection settings updated from popup');
+            sendResponse({success: true});
+        }
+        
+        if (request.leaderboardSettings) {
+            // Update leaderboard settings
+            leaderboardSettings = Object.assign(leaderboardSettings, request.leaderboardSettings);
+            console.log('Leaderboard settings updated from popup:', leaderboardSettings);
             sendResponse({success: true});
         }
         
@@ -1046,6 +1231,18 @@
             // Toggle first move strategy setting
             isFirstMoveStrategyEnabled = request.enabled;
             console.log('First Move Strategy toggled:', isFirstMoveStrategyEnabled);
+            sendResponse({success: true});
+        }
+        
+        if (request.action === 'autoDetectUsername') {
+            // Auto-detect username
+            const detectedUsername = autoDetectUsername();
+            sendResponse({success: true, username: detectedUsername});
+        }
+        
+        if (request.action === 'testLeaderboard') {
+            // Test leaderboard functionality
+            testLeaderboard();
             sendResponse({success: true});
         }
         
