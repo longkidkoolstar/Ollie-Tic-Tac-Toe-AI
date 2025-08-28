@@ -577,7 +577,25 @@
             // Prevent duplicate detection for the same opponent
             if (this.lastProfileDetectionName === displayName) {
                 self.log('Profile detection already performed for: ' + displayName + ', skipping duplicate');
-                callback(false, null);
+                
+                // Look up the previous detection result from history
+                var previousResult = null;
+                for (var i = this.detectionHistory.length - 1; i >= 0; i--) {
+                    var detection = this.detectionHistory[i];
+                    if (detection.opponent.toLowerCase() === displayName.toLowerCase()) {
+                        previousResult = detection;
+                        break;
+                    }
+                }
+                
+                if (previousResult) {
+                    var isBot = previousResult.type === 'bot';
+                    self.log('Using previous detection result: ' + (isBot ? 'BOT' : 'HUMAN'));
+                    callback(isBot, null);
+                } else {
+                    self.log('No previous detection found, assuming human', 'WARN');
+                    callback(false, null);
+                }
                 return;
             }
 
@@ -1023,10 +1041,56 @@
             }
         },
         
-        // Check if known bot
+        // Check if known bot - checks both knownBots array and detection history
         isKnownBot: function(opponentName) {
             if (!opponentName) return false;
-            return this.knownBots.includes(opponentName.toLowerCase());
+            
+            var lowerName = opponentName.toLowerCase();
+            
+            // First check the knownBots array
+            if (this.knownBots.includes(lowerName)) {
+                return true;
+            }
+            
+            // Then check the detection history for recent classifications
+            for (var i = this.detectionHistory.length - 1; i >= 0; i--) {
+                var detection = this.detectionHistory[i];
+                if (detection.opponent.toLowerCase() === lowerName) {
+                    // Return true if classified as bot, false if classified as human
+                    return detection.type === 'bot';
+                }
+            }
+            
+            // If not found in either, assume unknown (not a bot)
+            return false;
+        },
+        
+        // Get opponent classification with confidence level
+        getOpponentClassification: function(opponentName) {
+            if (!opponentName) return { type: 'unknown', confidence: 0, source: 'none' };
+            
+            var lowerName = opponentName.toLowerCase();
+            
+            // Check knownBots array first (highest confidence)
+            if (this.knownBots.includes(lowerName)) {
+                return { type: 'bot', confidence: 1.0, source: 'knownBots' };
+            }
+            
+            // Check detection history (medium to high confidence)
+            for (var i = this.detectionHistory.length - 1; i >= 0; i--) {
+                var detection = this.detectionHistory[i];
+                if (detection.opponent.toLowerCase() === lowerName) {
+                    return { 
+                        type: detection.type, 
+                        confidence: detection.confidence || 0.8, 
+                        source: 'detectionHistory',
+                        timestamp: detection.timestamp
+                    };
+                }
+            }
+            
+            // Unknown opponent
+            return { type: 'unknown', confidence: 0, source: 'none' };
         }
     };
 
