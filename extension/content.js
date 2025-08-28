@@ -1750,11 +1750,14 @@ function updateBoard(squareId) {
         return false;
     }
 
-// Function to check if the script is enabled
+// Function to check if the script is enabled and not disabled by payment/version issues
 function checkIfScriptEnabled() {
     return new Promise((resolve) => {
-        chrome.storage.sync.get(['isScriptEnabled'], function(result) {
-            resolve(result.isScriptEnabled);
+        chrome.storage.sync.get(['isScriptEnabled', 'scriptDisabled'], function(result) {
+            const isEnabled = result.isScriptEnabled || false;
+            const isDisabled = result.scriptDisabled || false;
+            // Script is only truly enabled if it's turned on AND not disabled by payment/version
+            resolve(isEnabled && !isDisabled);
         });
     });
 }
