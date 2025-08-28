@@ -997,6 +997,10 @@
             if (enabled) {
                 startAutoPlay();
                 this.log('Auto Play enabled');
+                // Automatically click play online button when auto play is first enabled
+                setTimeout(function() {
+                    clickPlayOnlineButton();
+                }, 500); // Small delay to ensure the page is ready
             } else {
                 stopAutoPlay();
                 this.log('Auto Play disabled');
