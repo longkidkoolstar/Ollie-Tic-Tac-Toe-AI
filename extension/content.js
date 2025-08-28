@@ -622,27 +622,42 @@
         initializeGUI: function() {
             if (document.getElementById('ttt-ai-status-bar')) return; // Already initialized
             
+            var self = this;
+            
             // Create main status bar container
             var statusBar = document.createElement('div');
             statusBar.id = 'ttt-ai-status-bar';
-            statusBar.style.cssText = `
-                position: fixed;
-                top: 10px;
-                right: 10px;
-                background: linear-gradient(135deg, #2c3e50, #34495e);
-                color: white;
-                padding: 12px 16px;
-                border-radius: 8px;
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                font-size: 13px;
-                z-index: 10000;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                min-width: 280px;
-                max-width: 400px;
-                border: 1px solid #34495e;
-                cursor: move;
-                user-select: none;
-            `;
+            
+            // Load saved position or use default
+            chrome.storage.sync.get(['guiPosition'], function(result) {
+                var position = result.guiPosition || { top: 10, right: 10 };
+                
+                statusBar.style.cssText = `
+                    position: fixed;
+                    top: ${position.top}px;
+                    right: ${position.right}px;
+                    background: linear-gradient(135deg, #2c3e50, #34495e);
+                    color: white;
+                    padding: 12px 16px;
+                    border-radius: 8px;
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    font-size: 13px;
+                    z-index: 10000;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                    min-width: 280px;
+                    max-width: 400px;
+                    border: 1px solid #34495e;
+                    cursor: move;
+                    user-select: none;
+                `;
+                
+                // Continue with the rest of the GUI setup after positioning is set
+                self.continueGUISetup(statusBar);
+            });
+        },
+        
+        // Continue GUI setup after position is loaded
+        continueGUISetup: function(statusBar) {
             
             // Status content container
             var statusContent = document.createElement('div');
@@ -753,9 +768,24 @@
             var initialY;
             var xOffset = 0;
             var yOffset = 0;
+            var hasBeenDragged = false;
 
             element.addEventListener('mousedown', function(e) {
                 if (e.target === element || e.target.parentNode === element) {
+                    // If this is the first drag, calculate offset from current position
+                    if (!hasBeenDragged) {
+                        var rect = element.getBoundingClientRect();
+                        xOffset = rect.left;
+                        yOffset = rect.top;
+                        hasBeenDragged = true;
+                        
+                        // Switch to transform-based positioning
+                        element.style.transform = `translate(${xOffset}px, ${yOffset}px)`;
+                        element.style.right = 'auto';
+                        element.style.left = '0px';
+                        element.style.top = '0px';
+                    }
+                    
                     initialX = e.clientX - xOffset;
                     initialY = e.clientY - yOffset;
                     isDragging = true;
@@ -786,7 +816,17 @@
             });
 
             document.addEventListener('mouseup', function() {
-                isDragging = false;
+                if (isDragging) {
+                    isDragging = false;
+                    
+                    // Save the new position to chrome storage
+                    var rect = element.getBoundingClientRect();
+                    var position = {
+                        top: rect.top,
+                        right: window.innerWidth - rect.right
+                    };
+                    chrome.storage.sync.set({ guiPosition: position });
+                }
             });
         },
 
@@ -1229,8 +1269,7 @@
                     'app-profile-sidenav .btn-close',
                     'app-profile-sidenav button[aria-label="Close"]',
                     'app-profile-sidenav .close',
-                    'app-profile-sidenav [class*="close"]',
-                    'app-profile-sidenav button'
+                    'app-profile-sidenav [class*="close"]'
                 ];
 
                 for (var i = 0; i < closeSelectors.length; i++) {
@@ -1240,6 +1279,22 @@
                         this.log('Closed profile sidebar using selector: ' + closeSelectors[i]);
                         return true;
                     }
+                }
+                
+                // Try to find buttons that are NOT friend buttons
+                var buttons = document.querySelectorAll('app-profile-sidenav button');
+                for (var j = 0; j < buttons.length; j++) {
+                    var button = buttons[j];
+                    var buttonText = button.textContent.toLowerCase().trim();
+                    // Skip friend-related buttons
+                    if (buttonText.includes('friend') || buttonText.includes('add') || 
+                        button.classList.contains('btn-secondary')) {
+                        continue;
+                    }
+                    // Click non-friend buttons (likely close buttons)
+                    button.click();
+                    this.log('Closed profile sidebar using non-friend button');
+                    return true;
                 }
 
                 // Alternative: Click outside the sidebar to close it
@@ -2028,20 +2083,26 @@ function updateBoard(squareId) {
     // Handle new game detection and bot detection
     function handleNewGame() {
         BotManager.log('=== NEW GAME DETECTED ===');
-        BotManager.setThinking('New Game Started', 'Detecting opponent...');
         gameState.isGameActive = true;
         gameState.gameEndDetected = false;
         gameState.opponentDetected = false;
         gameState.aiDetectedGameEnd = false;
         
-        // Reset current opponent (but keep games counter until we know if it's the same opponent)
-        var previousOpponent = BotManager.currentOpponent;
-        BotManager.currentOpponent = null;
-        
-        // Detect opponent after a short delay to let UI load
-        setTimeout(function() {
-            detectCurrentOpponent(previousOpponent);
-        }, 2000);
+        // Only run bot detection and opponent tracking when auto-play is enabled
+        if (isAutoPlayOn) {
+            BotManager.setThinking('New Game Started', 'Detecting opponent...');
+            
+            // Reset current opponent (but keep games counter until we know if it's the same opponent)
+            var previousOpponent = BotManager.currentOpponent;
+            BotManager.currentOpponent = null;
+            
+            // Detect opponent after a short delay to let UI load
+            setTimeout(function() {
+                detectCurrentOpponent(previousOpponent);
+            }, 2000);
+        } else {
+            BotManager.setThinking('Manual Mode', 'Auto-play disabled - no bot detection');
+        }
     }
     
     // Handle game end detection
@@ -2298,13 +2359,16 @@ async function startInterval() {
     setInterval(async function() {
         const isEnabled = await checkIfScriptEnabled();
 
-        // Only run the functionality if the state has changed to enabled
-        if (isEnabled) {
-           // console.log("Script enabled. Starting functionality...");
-            initAITurn(); // Call the function when enabled
+        // Only run the functionality if the state has changed to enabled AND auto-play is on
+        if (isEnabled && isAutoPlayOn) {
+           // console.log("Script enabled and auto-play on. Starting functionality...");
+            initAITurn(); // Call the function when enabled and auto-play is on
         } else if (!isEnabled) {
        //     console.log("Script disabled. Stopping functionality...");
             // Optionally handle stopping the functionality if needed
+        } else if (!isAutoPlayOn) {
+       //     console.log("Auto-play disabled. Stopping AI functionality...");
+            // AI functionality stopped when auto-play is off
         }
 
 
