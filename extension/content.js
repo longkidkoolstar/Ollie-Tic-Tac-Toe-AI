@@ -488,29 +488,11 @@
         }
     }
     
-    // Function to track countdown and click if it changes
-    function trackAndClickIfDifferent() {
-        const spanElement = document.querySelector('app-count-down span');
-        if (spanElement) {
-            const number = parseInt(spanElement.textContent, 10);
-            if (!isNaN(number)) {
-                if (previousNumber !== null && number !== previousNumber && isAutoPlayOn) {
-                    spanElement.click();
-                }
-                previousNumber = number;
-            }
-        }
-    }
-    
     // Function to start the auto-play process
     function startAutoPlay() {
         if (!checkIntervalId) { // Start only if it's not already running
             checkIntervalId = setInterval(checkButtonsPeriodically, 1000);
         }
-        // Commenting out to see if causing the leave game bug(It does; don't remove the comment until further notice)
-        /*if (!trackIntervalId) { // Start only if it's not already running
-            trackIntervalId = setInterval(trackAndClickIfDifferent, 1000);
-        }*/
     }
 
     // Function to stop the auto-play process
