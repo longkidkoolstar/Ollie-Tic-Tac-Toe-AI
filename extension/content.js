@@ -1175,9 +1175,17 @@
                             this.log('Found name element in container ' + containerIndex + ': "' + nameText + '"');
                             this.log('Name element classes: ' + nameElement.className);
 
-                            // Check if this is likely the opponent (not our own name)
-                            // We'll return the first clickable name we find for now
-                            return nameElement;
+                            // Check if this matches the expected opponent name
+                            if (displayName && nameText.toLowerCase() === displayName.toLowerCase()) {
+                                this.log('Found matching opponent name element: "' + nameText + '"');
+                                return nameElement;
+                            } else if (displayName) {
+                                this.log('Name element "' + nameText + '" does not match expected opponent "' + displayName + '"');
+                            } else {
+                                // If no displayName provided, return first found (fallback behavior)
+                                this.log('No displayName provided, using first found name element');
+                                return nameElement;
+                            }
                         } else {
                             this.log('No appprofileopener element in container ' + containerIndex);
 
@@ -1196,14 +1204,15 @@
                                     var altText = altElement.textContent.trim();
                                     this.log('Alternative element found in container ' + containerIndex + ' with selector "' + altSelectors[k] + '": "' + altText + '"');
 
-                                    // Check if this element contains the opponent name we're looking for
-                                    // We can use the displayName parameter to verify
-                                    if (displayName && altText.includes(displayName)) {
-                                        this.log('Using alternative element as it contains opponent name: ' + displayName);
+                                    // Check if this element matches the opponent name we're looking for
+                                    if (displayName && altText.toLowerCase() === displayName.toLowerCase()) {
+                                        this.log('Using alternative element as it matches opponent name: ' + displayName);
                                         return altElement;
                                     } else if (!displayName && altText.length > 3) {
                                         this.log('Using alternative element as it seems to contain a name');
                                         return altElement;
+                                    } else if (displayName) {
+                                        this.log('Alternative element "' + altText + '" does not match expected opponent "' + displayName + '"');
                                     }
                                 }
                             }
@@ -1226,8 +1235,8 @@
                         var element = allClickableElements[m];
                         var elementText = element.textContent.trim();
 
-                        if (elementText.includes(displayName)) {
-                            this.log('Found clickable element containing opponent name: "' + elementText + '"');
+                        if (elementText.toLowerCase() === displayName.toLowerCase()) {
+                            this.log('Found clickable element matching opponent name: "' + elementText + '"');
                             this.log('Element tag: ' + element.tagName + ', classes: ' + element.className);
                             return element;
                         }
