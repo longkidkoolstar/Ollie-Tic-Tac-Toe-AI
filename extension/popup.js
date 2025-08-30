@@ -1,5 +1,5 @@
 // ===== VERSION CHECK SYSTEM CONSTANTS =====
-const LOCAL_SCRIPT_VERSION = "1.0.1";
+const LOCAL_SCRIPT_VERSION = "1.0.2";
 const API_BASE = "https://api.jsonstorage.net/v1/json/";
 const API_PATH = "d206ce58-9543-48db-a5e4-997cfc745ef3/7e7adc93-d373-4050-b5c1-c8b7115fbdb3";
 const API_KEY = "796c9bbf-df23-4228-afef-c3357694c29b";
@@ -408,10 +408,11 @@ async function performVersionCheck() {
                 console.log(`[Version Check] Version mismatch: Local=${LOCAL_SCRIPT_VERSION}, Remote=${data.scriptVersion}`);
                 console.log('[Version Check] Script outdated - disabling script');
                 alert(`Script update required. Current: ${LOCAL_SCRIPT_VERSION}, Required: ${data.scriptVersion}`);
+                startUpdateAlerts(data.scriptUpdateLinkExtension);
                 scriptDisabled = true;
                 chrome.storage.sync.set({ scriptDisabled: true });
                 updateToggleButton(); // Update UI to reflect disabled state
-                startUpdateAlerts(data.scriptUpdateLinkExtension);
+                
                 resolve({
                     status: 'outdated',
                     message: `Update required: Local=${LOCAL_SCRIPT_VERSION}, Remote=${data.scriptVersion}`,

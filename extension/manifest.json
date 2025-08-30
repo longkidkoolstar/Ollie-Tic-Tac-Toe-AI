@@ -1,9 +1,9 @@
 {
     "manifest_version": 3,
     "name": "Tic Tac Toe AI for papergames",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "AI plays Tic-Tac-Toe for you on papergames.io. Have fun and destroy some nerds 😃!!",
-    "permissions": ["cookies", "storage", "scripting"],
+    "permissions": ["cookies", "storage", "scripting", "tabs"],
     "action": {
         "default_popup": "popup.html",
         "default_icon": {
