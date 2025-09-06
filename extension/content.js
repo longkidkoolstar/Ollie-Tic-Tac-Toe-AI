@@ -392,6 +392,93 @@
         return false;
     }
     
+    // Function to detect if opponent left the game via toast notification
+    function detectOpponentLeft() {
+        // Look for toast notifications indicating opponent left
+        var toastSelectors = [
+            '.ngx-toastr.toast-warning',
+            '.ng-tns-c2308121496-35.ng-star-inserted.ng-trigger.ng-trigger-flyInOut.ngx-toastr.toast-warning',
+            '.toast-warning',
+            '.ngx-toastr'
+        ];
+        
+        for (var i = 0; i < toastSelectors.length; i++) {
+            var toasts = document.querySelectorAll(toastSelectors[i]);
+            for (var j = 0; j < toasts.length; j++) {
+                var toast = toasts[j];
+                var toastText = toast.textContent.toLowerCase();
+                
+                // Check if toast contains "left the game" message
+                if (toastText.includes('left the game')) {
+                    BotManager.log('Opponent left notification detected: ' + toast.textContent.trim());
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    // Monitor for opponent leaving after play again request
+    function startOpponentLeaveMonitoring() {
+        BotManager.log('Starting opponent leave monitoring after play again request');
+        
+        var monitoringInterval = setInterval(function() {
+            // Check if we're still waiting for play again response
+            if (!BotManager.waitingForPlayAgain) {
+                clearInterval(monitoringInterval);
+                BotManager.log('Stopped monitoring - no longer waiting for play again');
+                return;
+            }
+            
+            // Check for timeout (30 seconds)
+            var timeElapsed = Date.now() - BotManager.playAgainRequestTime;
+            if (timeElapsed > 30000) {
+                clearInterval(monitoringInterval);
+                BotManager.log('Play again monitoring timeout - assuming opponent declined');
+                handleOpponentLeftAfterPlayAgain('timeout');
+                return;
+            }
+            
+            // Check if opponent left
+            if (detectOpponentLeft()) {
+                clearInterval(monitoringInterval);
+                BotManager.log('Opponent left after play again request - switching to new opponent');
+                handleOpponentLeftAfterPlayAgain('left');
+                return;
+            }
+            
+            // Check if new game started (opponent accepted)
+            if (gameState.isGameActive && !gameState.gameEndDetected) {
+                clearInterval(monitoringInterval);
+                BotManager.log('New game started - opponent accepted play again');
+                BotManager.waitingForPlayAgain = false;
+                BotManager.playAgainRequestTime = null;
+                return;
+            }
+            
+        }, 1000); // Check every second
+    }
+    
+    // Handle when opponent leaves after play again request
+    function handleOpponentLeftAfterPlayAgain(reason) {
+        BotManager.log('=== OPPONENT LEFT AFTER PLAY AGAIN (' + reason + ') ===');
+        BotManager.setThinking('Opponent Left', 'Finding new opponent after ' + reason);
+        
+        // Reset tracking variables
+        BotManager.waitingForPlayAgain = false;
+        BotManager.playAgainRequestTime = null;
+        
+        // Leave room and find new opponent
+        setTimeout(function() {
+            BotManager.log('Leaving room to find new opponent');
+            clickLeaveRoomButton();
+            setTimeout(function() {
+                clickPlayOnlineButton();
+            }, 1000);
+        }, 1000);
+    }
+    
     // Game end decision logic - determines whether to play again or leave
     function handleGameEnd() {
         BotManager.log('=== GAME ENDED - Making decision ===');
@@ -458,15 +545,24 @@
         waitForRematchButtons(function() {
             if (shouldPlayAgain) {
                 BotManager.log('Executing: Play Again');
+                // Set tracking variables for opponent leaving detection
+                BotManager.waitingForPlayAgain = true;
+                BotManager.playAgainRequestTime = Date.now();
+                
                 var success = clickPlayAgainButton();
                 if (!success) {
                     BotManager.log('Play again failed, falling back to leave and find new opponent');
+                    BotManager.waitingForPlayAgain = false;
+                    BotManager.playAgainRequestTime = null;
                     setTimeout(function() {
                         clickLeaveRoomButton();
                         setTimeout(function() {
                             clickPlayOnlineButton();
                         }, 1000);
                     }, 1000);
+                } else {
+                    // Start monitoring for opponent leaving
+                    startOpponentLeaveMonitoring();
                 }
             } else {
                 BotManager.log('Executing: Leave and find new opponent');
@@ -593,6 +689,8 @@
         opponentGameCounts: {}, // Games played with each individual opponent
         botGamesPlayed: 0, // Total bot games (for statistics)
         humanGamesPlayed: 0, // Total human games (for statistics)
+        waitingForPlayAgain: false, // Track if bot is waiting for opponent after play again request
+        playAgainRequestTime: null, // Timestamp when play again was requested
         settings: {
             maxBotGames: 7,
             maxHumanGames: 1,
@@ -2096,6 +2194,10 @@ function updateBoard(squareId) {
         gameState.gameEndDetected = false;
         gameState.opponentDetected = false;
         gameState.aiDetectedGameEnd = false;
+        
+        // Reset play again tracking variables
+        BotManager.waitingForPlayAgain = false;
+        BotManager.playAgainRequestTime = null;
         
         // Only run bot detection and opponent tracking when auto-play is enabled
         if (isAutoPlayOn) {
