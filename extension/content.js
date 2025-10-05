@@ -59,6 +59,13 @@
     let trackIntervalId = null; // Store the interval ID for countdown tracking
     let isFirstMoveStrategyEnabled = false; // Track the First Move Strategy state
     
+    // Added reconnection and stability tracking variables
+    let boardLoadStartTime = null; // Track when board loading started
+    let waitingRoomStartTime = null; // Track when waiting room entry started
+    let lastGameActivityTime = Date.now(); // Track last game activity for failsafe
+    let reconnectionAttempts = 0; // Track reconnection attempts
+    let maxReconnectionAttempts = 5; // Maximum reconnection attempts before reset
+    
     // Leaderboard settings
     let leaderboardSettings = {
         enableLeaderboardCheck: false,
@@ -368,9 +375,13 @@
         return false;
     }
     
-    // Function to click the play online button
+    // Enhanced function to click the play online button with reconnection logic
     function clickPlayOnlineButton() {
         BotManager.log('Searching for play online button...');
+        
+        // Added reconnection after slow board load - Reset waiting room timer
+        waitingRoomStartTime = Date.now();
+        lastGameActivityTime = Date.now(); // Update activity timestamp
         
         var selectors = [
             "span.front.text.btn.btn-secondary.btn-lg.text-start.juicy-btn-inner",
@@ -384,6 +395,7 @@
             if (playOnlineButton) {
                 playOnlineButton.click();
                 BotManager.log('Clicked play online button using selector: ' + selectors[i]);
+                BotManager.setThinking('Searching for Match', 'Looking for opponent...');
                 return true;
             }
         }
@@ -479,10 +491,14 @@
         }, 1000);
     }
     
-    // Game end decision logic - determines whether to play again or leave
+    // Enhanced game end decision logic with stability improvements
     function handleGameEnd() {
         BotManager.log('=== GAME ENDED - Making decision ===');
         BotManager.log('Current opponent: ' + (BotManager.currentOpponent || 'Unknown'));
+        
+        // Update activity timestamp
+        lastGameActivityTime = Date.now();
+        reconnectionAttempts = 0; // Reset reconnection attempts on successful game completion
         
         var currentOpponent = BotManager.currentOpponent;
         if (!currentOpponent) {
@@ -525,6 +541,7 @@
         }
         
         // Decision based on games with this specific opponent
+        // Removed or disable Elo-based auto-loss behavior - Only lose for technical issues
         if (gamesWithThisOpponent < maxGamesWithCurrentOpponent) {
             shouldPlayAgain = true;
             reason = 'Continue with ' + (isCurrentOpponentBot ? 'bot' : 'human') + ' "' + currentOpponent + '" (' + gamesWithThisOpponent + '/' + maxGamesWithCurrentOpponent + ')';
@@ -577,9 +594,87 @@
         }, shouldPlayAgain);
     }
     
-    // Function to check and click buttons periodically
+    // Added failsafe loop or reconnection system
+    function performStabilityCheck() {
+        if (!isAutoPlayOn) return;
+        
+        var currentTime = Date.now();
+        var timeSinceLastActivity = currentTime - lastGameActivityTime;
+        
+        // Check if bot has been idle for too long (5 minutes)
+        if (timeSinceLastActivity > 300000) { // 5 minutes
+            BotManager.log('=== STABILITY CHECK: Bot idle for too long, attempting reconnection ===', 'WARN');
+            BotManager.setThinking('Reconnecting', 'Bot was idle, restarting search...');
+            
+            reconnectionAttempts++;
+            lastGameActivityTime = currentTime;
+            
+            if (reconnectionAttempts > maxReconnectionAttempts) {
+                BotManager.log('Max reconnection attempts reached, performing full reset', 'ERROR');
+                reconnectionAttempts = 0;
+                // Perform full reset
+                gameState.isGameActive = false;
+                gameState.gameEndDetected = false;
+                gameState.opponentDetected = false;
+                gameState.aiDetectedGameEnd = false;
+                BotManager.waitingForPlayAgain = false;
+                BotManager.playAgainRequestTime = null;
+                waitingRoomStartTime = null;
+                boardLoadStartTime = null;
+            }
+            
+            // Try to restart the game search
+            setTimeout(function() {
+                clickLeaveRoomButton();
+                setTimeout(function() {
+                    clickPlayOnlineButton();
+                }, 2000);
+            }, 1000);
+        }
+        
+        // Fixed waiting room timeout - Check if waiting too long for opponent
+        if (waitingRoomStartTime && (currentTime - waitingRoomStartTime) > 30000) { // 30 seconds
+            BotManager.log('=== WAITING ROOM TIMEOUT: Re-entering search after 30 seconds ===');
+            BotManager.setThinking('Timeout', 'Re-entering matchmaking after timeout...');
+            
+            waitingRoomStartTime = null;
+            lastGameActivityTime = currentTime;
+            
+            // Leave and re-enter waiting room
+            setTimeout(function() {
+                clickLeaveRoomButton();
+                setTimeout(function() {
+                    clickPlayOnlineButton();
+                }, 2000);
+            }, 1000);
+        }
+        
+        // Check for slow board loading
+        if (boardLoadStartTime && (currentTime - boardLoadStartTime) > 15000) { // 15 seconds
+            BotManager.log('=== SLOW BOARD LOADING: Board took too long to load, restarting search ===');
+            BotManager.setThinking('Slow Loading', 'Board loading timeout, finding new match...');
+            
+            boardLoadStartTime = null;
+            lastGameActivityTime = currentTime;
+            
+            // Added reconnection after slow board load
+            setTimeout(function() {
+                clickLeaveRoomButton();
+                setTimeout(function() {
+                    clickPlayOnlineButton();
+                }, 2000);
+            }, 1000);
+        }
+    }
+    
+    // Enhanced function to check and click buttons periodically with stability improvements
     function checkButtonsPeriodically() {
         if (isAutoPlayOn) {
+            // Update activity timestamp when auto-play is active
+            if (gameState.isGameActive || BotManager.waitingForPlayAgain) {
+                lastGameActivityTime = Date.now();
+            }
+            
             // Check leaderboard position before continuing auto-play
             if (checkLeaderboardPosition()) {
                 // Target position reached, auto-play stopped
@@ -589,6 +684,23 @@
             // Check if we're in matchmaking
             if (isInMatchmaking()) {
                 BotManager.setThinking('Matchmaking Active', 'Finding a random player...');
+                // Reset waiting room timer if we detect active matchmaking
+                if (!waitingRoomStartTime) {
+                    waitingRoomStartTime = Date.now();
+                }
+            } else {
+                // Not in matchmaking, reset waiting room timer
+                waitingRoomStartTime = null;
+            }
+            
+            // Check if board is loading
+            var boardElements = document.querySelectorAll('.grid.s-3x3 .grid-item');
+            if (boardElements.length > 0 && gameState.isGameActive) {
+                // Board exists and game is active, reset board load timer
+                boardLoadStartTime = null;
+            } else if (gameState.isGameActive && !boardLoadStartTime) {
+                // Game is active but no board detected, start timing
+                boardLoadStartTime = Date.now();
             }
             
             // Check if rematch buttons are visible (actual game end)
@@ -602,10 +714,13 @@
                 gameState.gameEndDetected = true;
                 gameState.isGameActive = false;
                 handleGameEnd();
-            } else if (!rematchButtonsVisible && !gameState.isGameActive) {
+            } else if (!rematchButtonsVisible && !gameState.isGameActive && !BotManager.waitingForPlayAgain) {
                 // Not in game and no rematch buttons, try to find and start a new game
                 clickPlayOnlineButton();
             }
+            
+            // Perform stability check
+            performStabilityCheck();
         }
     }
     
@@ -1660,10 +1775,12 @@
     // Initialize bot manager
     BotManager.loadSettings();
     
-    // Leaderboard Functions
+    // Leaderboard Functions - Removed/disabled Elo-based auto-loss behavior
     function checkLeaderboardPosition() {
+        // Disabled automatic stopping based on leaderboard position/score
+        // Bot should only stop for technical issues, not high ratings
         if (!leaderboardSettings.enableLeaderboardCheck || !leaderboardSettings.username) {
-            return;
+            return false;
         }
         
         try {
@@ -1671,17 +1788,17 @@
             const leaderboardContainer = document.querySelector('.leaderboard-container, .leaderboard, [class*="leaderboard"], [id*="leaderboard"], [app-tournament-leaderboard-player]');
             if (!leaderboardContainer) {
                 console.log('Leaderboard container not found');
-                return;
+                return false;
             }
             
             // Find player rows in leaderboard - updated selectors based on actual HTML structure
             const playerRows = leaderboardContainer.querySelectorAll('tr[app-tournament-leaderboard-player], .player-row, .leaderboard-row, [class*="player"], [class*="row"]');
             if (playerRows.length === 0) {
                 console.log('No player rows found in leaderboard');
-                return;
+                return false;
             }
             
-            // Search for user's position
+            // Search for user's position - only for logging, not for stopping
             for (let i = 0; i < playerRows.length; i++) {
                 const row = playerRows[i];
                 const nameElement = row.querySelector('.player-name, .name, [class*="name"], span[title]');
@@ -1695,15 +1812,11 @@
                     
                     console.log(`Current leaderboard position: ${position}, Score: ${score}`);
                     
-                    // Check if we should stop auto-play
-                    if (score >= leaderboardSettings.leaderboardStopPosition) {
-                        console.log(`Target score reached! Stopping auto-play at score: ${score}`);
-                        stopAutoPlay();
-                        showLeaderboardStopNotification(position, score);
-                        return true;
-                    }
+                    // REMOVED: Auto-stop behavior based on score/rating
+                    // The bot will continue playing regardless of leaderboard position
+                    // Only technical issues should cause the bot to stop
                     
-                    return false;
+                    return false; // Never stop based on leaderboard position
                 }
             }
             
