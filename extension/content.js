@@ -1242,8 +1242,20 @@
                 
                 if (previousResult) {
                     var isBot = previousResult.type === 'bot';
-                    self.log('Using previous detection result: ' + (isBot ? 'BOT' : 'HUMAN'));
-                    callback(isBot, null);
+                    // Extract profile name from the detection factors
+                    var profileName = null;
+                    if (previousResult.factors && previousResult.factors.length > 0) {
+                        var factor = previousResult.factors[0];
+                        if (factor.includes('profile="') && factor.includes('"')) {
+                            var startIndex = factor.indexOf('profile="') + 9;
+                            var endIndex = factor.indexOf('"', startIndex);
+                            if (endIndex > startIndex) {
+                                profileName = factor.substring(startIndex, endIndex);
+                            }
+                        }
+                    }
+                    self.log('Using previous detection result: ' + (isBot ? 'BOT' : 'HUMAN') + ' (Profile: ' + profileName + ')');
+                    callback(isBot, profileName);
                 } else {
                     self.log('No previous detection found, assuming human', 'WARN');
                     callback(false, null);
@@ -1314,7 +1326,7 @@
                                 opponent: displayName,
                                 type: 'human',
                                 confidence: 1.0,
-                                factors: ['Profile name matches display name'],
+                                factors: ['Profile name matches display name: display="' + displayName + '", profile="' + profileName + '"'],
                                 timestamp: Date.now()
                             });
 
@@ -1508,14 +1520,20 @@
                 for (var j = 0; j < buttons.length; j++) {
                     var button = buttons[j];
                     var buttonText = button.textContent.toLowerCase().trim();
-                    // Skip friend-related buttons
-                    if (buttonText.includes('friend') || buttonText.includes('add') || 
-                        button.classList.contains('btn-secondary')) {
+                    // Skip friend-related buttons - be more specific about what to avoid
+                    if (buttonText.includes('friend') || 
+                        buttonText.includes('add as friend') || 
+                        buttonText.includes('add') ||
+                        buttonText.includes('follow') ||
+                        buttonText.includes('message') ||
+                        buttonText.includes('block') ||
+                        buttonText.includes('report')) {
+                        this.log('Skipping button to avoid unwanted action: "' + buttonText + '"');
                         continue;
                     }
                     // Click non-friend buttons (likely close buttons)
                     button.click();
-                    this.log('Closed profile sidebar using non-friend button');
+                    this.log('Closed profile sidebar using non-friend button: "' + buttonText + '"');
                     return true;
                 }
 
@@ -2002,12 +2020,16 @@ function updateBoard(squareId) {
     chrome.storage.sync.get("username", function(result) {
         var username = result.username; // Retrieve the username from storage
         if (!username) {
-            console.error("Username not found in storage");
+            console.error("Username not found in storage. Please set your username in the extension popup.");
             return;
         }
 
         var profileOpeners = document.querySelectorAll(".text-truncate.cursor-pointer");
         var profileOpener = null;
+
+        // Log available profile openers for debugging
+        console.log("Available profile openers:", Array.from(profileOpeners).map(opener => opener.textContent.trim()));
+        console.log("Looking for username:", username);
 
         profileOpeners.forEach(function(opener) {
             if (opener.textContent.trim() === username) {
@@ -2016,8 +2038,32 @@ function updateBoard(squareId) {
         });
 
         if (!profileOpener) {
-            console.error("Profile opener not found");
-            return;
+            console.warn("Profile opener not found for username:", username);
+            console.warn("Available usernames:", Array.from(profileOpeners).map(opener => opener.textContent.trim()));
+            
+            // Try alternative selectors as fallback
+            var alternativeSelectors = [
+                ".cursor-pointer",
+                "[appprofileopener]",
+                ".text-truncate",
+                ".player-name"
+            ];
+            
+            for (var selector of alternativeSelectors) {
+                var elements = document.querySelectorAll(selector);
+                elements.forEach(function(element) {
+                    if (element.textContent.trim() === username) {
+                        profileOpener = element;
+                        console.log("Found profile opener using alternative selector:", selector);
+                    }
+                });
+                if (profileOpener) break;
+            }
+            
+            if (!profileOpener) {
+                console.error("Profile opener not found even with fallback selectors. Skipping this turn.");
+                return;
+            }
         }
 
         var chronometer = document.querySelector("app-chronometer");
@@ -2394,11 +2440,11 @@ function updateBoard(squareId) {
                     if (isBot) {
                         BotManager.log('Opponent "' + opponentName + '" detected as BOT');
                         BotManager.setThinking('Bot Detected', '🤖 ' + opponentName + ' is a bot');
-                        BotManager.displayBotDetectionNotification(opponentName, true, 'Profile name mismatch');
+                        BotManager.showBotDetectionNotification(opponentName, profileName);
                     } else {
                         BotManager.log('Opponent "' + opponentName + '" detected as HUMAN');
                         BotManager.setThinking('Human Detected', '👤 ' + opponentName + ' is human');
-                        BotManager.displayBotDetectionNotification(opponentName, false, 'Profile name matches');
+                        BotManager.showHumanDetectionNotification(opponentName, profileName);
                     }
                 });
             } else {

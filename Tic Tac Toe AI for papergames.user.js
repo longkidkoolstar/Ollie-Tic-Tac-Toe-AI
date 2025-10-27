@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ollie's Tic Tac Toe Bot
 // @namespace    https://github.com/longkidkoolstar
-// @version      1.0.0
+// @version      1.0.5
 // @description  AI plays Tic-Tac-Toe for you on papergames.io with advanced bot detection and leaderboard position checking. Have fun and destroy some nerds 😃!!
 // @author       longkidkoolstar
 // @icon         https://th.bing.com/th/id/R.3502d1ca849b062acb85cf68a8c48bcd?rik=LxTvt1UpLC2y2g&pid=ImgRaw&r=0
@@ -16,7 +16,7 @@
     'use strict';
 
     // ===== REMOTE VERSION CHECKING SYSTEM =====
-    const LOCAL_SCRIPT_VERSION = "1.0.0"; // Change this to test version mismatch: "1.2.3" for matching version
+    const LOCAL_SCRIPT_VERSION = "1.0.5"; // Change this to test version mismatch: "1.2.3" for matching version
     const API_BASE = "https://api.jsonstorage.net/v1/json/";
     const API_PATH = "d206ce58-9543-48db-a5e4-997cfc745ef3/7e7adc93-d373-4050-b5c1-c8b7115fbdb3";
     const API_KEY = "796c9bbf-df23-4228-afef-c3357694c29b";

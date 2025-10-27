@@ -1,5 +1,5 @@
 // ===== VERSION CHECK SYSTEM CONSTANTS =====
-const LOCAL_SCRIPT_VERSION = "1.0.4";
+const LOCAL_SCRIPT_VERSION = "1.0.5";
 const API_BASE = "https://api.jsonstorage.net/v1/json/";
 const API_PATH = "d206ce58-9543-48db-a5e4-997cfc745ef3/7e7adc93-d373-4050-b5c1-c8b7115fbdb3";
 const API_KEY = "796c9bbf-df23-4228-afef-c3357694c29b";
